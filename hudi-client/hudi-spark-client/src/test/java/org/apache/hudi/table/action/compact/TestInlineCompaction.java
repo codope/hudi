@@ -225,7 +225,7 @@ public class TestInlineCompaction extends CompactionTestBase {
 
     // Then: 1 delta commit is done, the failed compaction is retried
     metaClient = HoodieTableMetaClient.builder().setConf(hadoopConf).setBasePath(cfg.getBasePath()).build();
-    assertEquals(4, metaClient.getActiveTimeline().getWriteTimeline().countInstants());
+    assertEquals(5, metaClient.getActiveTimeline().getWriteTimeline().countInstants());
     assertEquals(instantTime, metaClient.getActiveTimeline().getCommitTimeline().filterCompletedInstants().firstInstant().get().getTimestamp());
   }
 
@@ -262,7 +262,7 @@ public class TestInlineCompaction extends CompactionTestBase {
 
     // Then: 1 delta commit is done, the failed compaction is retried
     metaClient = HoodieTableMetaClient.builder().setConf(hadoopConf).setBasePath(cfg.getBasePath()).build();
-    assertEquals(4, metaClient.getActiveTimeline().getWriteTimeline().countInstants());
+    assertEquals(5, metaClient.getActiveTimeline().getWriteTimeline().countInstants());
     assertEquals(instantTime, metaClient.getActiveTimeline().getCommitTimeline().filterCompletedInstants().firstInstant().get().getTimestamp());
   }
 }
