@@ -1697,7 +1697,7 @@ public class TestHoodieDeltaStreamer extends UtilitiesTestBase {
 
   @Test
   public void testInsertOverwrite() throws Exception {
-    String tableBasePath = dfsBasePath + "/test_table";
+    String tableBasePath = dfsBasePath + "/insert_overwrite";
     // Initial insert
     HoodieDeltaStreamer.Config cfg = TestHelpers.makeConfig(tableBasePath, WriteOperationType.INSERT);
     new HoodieDeltaStreamer(cfg, jsc).sync();
@@ -1721,7 +1721,7 @@ public class TestHoodieDeltaStreamer extends UtilitiesTestBase {
 
   @Test
   public void testInsertOverwriteTable() throws Exception {
-    String tableBasePath = dfsBasePath + "/test_table";
+    String tableBasePath = dfsBasePath + "/insert_overwrite_table";
     // Initial insert
     HoodieDeltaStreamer.Config cfg = TestHelpers.makeConfig(tableBasePath, WriteOperationType.INSERT);
     new HoodieDeltaStreamer(cfg, jsc).sync();
