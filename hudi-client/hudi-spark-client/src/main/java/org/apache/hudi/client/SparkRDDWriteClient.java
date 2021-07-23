@@ -483,7 +483,7 @@ public class SparkRDDWriteClient<T extends HoodieRecordPayload> extends
   }
 
   @Override
-  protected void unpersistRDD() {
+  protected void postCommitCleanup() {
     ((HoodieSparkEngineContext) context).getJavaSparkContext().getPersistentRDDs().values()
         .forEach(rdd -> rdd.unpersist());
   }
