@@ -190,7 +190,7 @@ class DefaultSource extends RelationProvider
                                   metaClient: HoodieTableMetaClient): BaseRelation = {
     log.info("Loading Base File Only View  with options :" + optParams)
     val (tableFileFormat, formatClassName) = metaClient.getTableConfig.getBaseFileFormat match {
-      case HoodieFileFormat.PARQUET => (new ParquetFileFormat, "parquet")
+      case HoodieFileFormat.PARQUET => (new HoodieParquetFileFormat, "parquet")
       case HoodieFileFormat.ORC => (new OrcFileFormat, "orc")
     }
 
