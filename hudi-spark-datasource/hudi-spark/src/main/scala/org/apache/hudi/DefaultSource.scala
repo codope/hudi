@@ -98,7 +98,8 @@ class DefaultSource extends RelationProvider
     val tablePath = if (globPaths.isDefined) {
       DataSourceUtils.getTablePath(fs, globPaths.get.toArray)
     } else {
-      DataSourceUtils.getTablePath(fs, Array(new Path(path.get)))
+      //DataSourceUtils.getTablePath(fs, Array(new Path(path.get)))
+      "file:///tmp/schema_evol/hudi_rename/"
     }
     log.info("Obtained hudi table path: " + tablePath)
 
@@ -190,7 +191,7 @@ class DefaultSource extends RelationProvider
                                   metaClient: HoodieTableMetaClient): BaseRelation = {
     log.info("Loading Base File Only View  with options :" + optParams)
     val (tableFileFormat, formatClassName) = metaClient.getTableConfig.getBaseFileFormat match {
-      case HoodieFileFormat.PARQUET => (new HoodieParquetFileFormat, "parquet")
+      case HoodieFileFormat.PARQUET => (new ParquetFileFormat, "parquet")
       case HoodieFileFormat.ORC => (new OrcFileFormat, "orc")
     }
 
