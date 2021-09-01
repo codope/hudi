@@ -114,7 +114,6 @@ public class HoodieParquetInputFormat extends MapredParquetInputFormat implement
   }
 
 
-
   /**
    * Achieves listStatus functionality for an incrementally queried table. Instead of listing all
    * partitions and then filtering based on the commits of interest, this logic first extracts the
@@ -213,7 +212,25 @@ public class HoodieParquetInputFormat extends MapredParquetInputFormat implement
     if (LOG.isDebugEnabled()) {
       LOG.debug("EMPLOYING DEFAULT RECORD READER - " + split);
     }
-    return super.getRecordReader(split, job, reporter);
+    String[] rawColNames = HoodieColumnProjectionUtils.getReadColumnNames(job);
+    List<Pair<String, String>> colNameWithTypes = HoodieColumnProjectionUtils.getIOColumnNameAndTypes(job);
+    List<String> newColNames = Arrays.stream(rawColNames).map(colName -> {
+      if (HoodieRecord.NEW_HOODIE_META_COLUMNS.contains(colName)) {
+        return HoodieRecord.NEW_HOODIE_META_COLUMNS_NAME_TO_OLD.get(colName);
+      }
+      return colName;
+    }).collect(Collectors.toList());
+    List<Pair<String, String>> newColNamesWithTypes = colNameWithTypes.stream().map(colNameWithType -> {
+      if (HoodieRecord.NEW_HOODIE_META_COLUMNS.contains(colNameWithType.getLeft())) {
+        return Pair.of(HoodieRecord.NEW_HOODIE_META_COLUMNS_NAME_TO_OLD.get(colNameWithType.getLeft()), colNameWithType.getRight());
+      }
+      return colNameWithType;
+    }).collect(Collectors.toList());
+    JobConf jobConfCopy = new JobConf(job);
+    HoodieColumnProjectionUtils.setReadColumns(jobConfCopy, HoodieColumnProjectionUtils.getReadColumnIDs(job), newColNames);
+    HoodieColumnProjectionUtils.setIOColumnNameAndTypes(jobConfCopy, newColNamesWithTypes);
+    LOG.info("New Read Column names :" + Arrays.asList(HoodieColumnProjectionUtils.getReadColumnNames(job)));
+    return super.getRecordReader(split, jobConfCopy, reporter);
   }
 
   @Override
@@ -227,7 +244,7 @@ public class HoodieParquetInputFormat extends MapredParquetInputFormat implement
     FileSplit split = new FileSplit(file, start, length, hosts);
 
     if (file instanceof PathWithBootstrapFileStatus) {
-      return makeExternalFileSplit((PathWithBootstrapFileStatus)file, split);
+      return makeExternalFileSplit((PathWithBootstrapFileStatus) file, split);
     }
     return split;
   }
@@ -237,7 +254,7 @@ public class HoodieParquetInputFormat extends MapredParquetInputFormat implement
                                 String[] hosts, String[] inMemoryHosts) {
     FileSplit split = new FileSplit(file, start, length, hosts, inMemoryHosts);
     if (file instanceof PathWithBootstrapFileStatus) {
-      return makeExternalFileSplit((PathWithBootstrapFileStatus)file, split);
+      return makeExternalFileSplit((PathWithBootstrapFileStatus) file, split);
     }
     return split;
   }

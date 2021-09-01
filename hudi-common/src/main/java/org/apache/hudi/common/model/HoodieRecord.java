@@ -18,16 +18,16 @@
 
 package org.apache.hudi.common.model;
 
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import org.apache.hudi.common.util.CollectionUtils;
 import org.apache.hudi.common.util.Option;
+import org.apache.hudi.common.util.collection.Pair;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
-import org.apache.hudi.common.util.collection.Pair;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * A Single Record managed by Hoodie.
@@ -40,10 +40,18 @@ public class HoodieRecord<T extends HoodieRecordPayload> implements Serializable
   public static final String PARTITION_PATH_METADATA_FIELD = "_hoodie_partition_path";
   public static final String FILENAME_METADATA_FIELD = "_hoodie_file_name";
   public static final String OPERATION_METADATA_FIELD = "_hoodie_operation";
+  public static final String NEW_COMMIT_TIME_METADATA_FIELD = "_hudi_commit_time";
+  public static final String NEW_COMMIT_SEQNO_METADATA_FIELD = "_hudi_commit_seqno";
+  public static final String NEW_RECORD_KEY_METADATA_FIELD = "_hudi_record_key";
+  public static final String NEW_PARTITION_PATH_METADATA_FIELD = "_hudi_partition_path";
+  public static final String NEW_FILENAME_METADATA_FIELD = "_hudi_file_name";
 
   public static final List<String> HOODIE_META_COLUMNS =
       CollectionUtils.createImmutableList(COMMIT_TIME_METADATA_FIELD, COMMIT_SEQNO_METADATA_FIELD,
           RECORD_KEY_METADATA_FIELD, PARTITION_PATH_METADATA_FIELD, FILENAME_METADATA_FIELD);
+  public static final List<String> NEW_HOODIE_META_COLUMNS =
+      CollectionUtils.createImmutableList(NEW_COMMIT_TIME_METADATA_FIELD, NEW_COMMIT_SEQNO_METADATA_FIELD,
+          NEW_RECORD_KEY_METADATA_FIELD, NEW_PARTITION_PATH_METADATA_FIELD, NEW_FILENAME_METADATA_FIELD);
 
   // Temporary to support the '_hoodie_operation' field, once we solve
   // the compatibility problem, it can be removed.
@@ -54,6 +62,9 @@ public class HoodieRecord<T extends HoodieRecordPayload> implements Serializable
 
   public static final Map<String, Integer> HOODIE_META_COLUMNS_NAME_TO_POS =
       IntStream.range(0, HOODIE_META_COLUMNS.size()).mapToObj(idx -> Pair.of(HOODIE_META_COLUMNS.get(idx), idx))
+          .collect(Collectors.toMap(Pair::getKey, Pair::getValue));
+  public static final Map<String, String> NEW_HOODIE_META_COLUMNS_NAME_TO_OLD =
+      IntStream.range(0, NEW_HOODIE_META_COLUMNS.size()).mapToObj(idx -> Pair.of(NEW_HOODIE_META_COLUMNS.get(idx), HOODIE_META_COLUMNS.get(idx)))
           .collect(Collectors.toMap(Pair::getKey, Pair::getValue));
 
   /**
