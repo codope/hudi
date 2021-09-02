@@ -98,8 +98,8 @@ class DefaultSource extends RelationProvider
     val tablePath = if (globPaths.isDefined) {
       DataSourceUtils.getTablePath(fs, globPaths.get.toArray)
     } else {
-      //DataSourceUtils.getTablePath(fs, Array(new Path(path.get)))
-      "file:///tmp/schema_evol/hudi_rename/"
+      DataSourceUtils.getTablePath(fs, Array(new Path(path.get)))
+      //"file:///tmp/schema_evol/hudi_rename/"
     }
     log.info("Obtained hudi table path: " + tablePath)
 
