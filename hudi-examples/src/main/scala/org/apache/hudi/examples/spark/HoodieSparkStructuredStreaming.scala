@@ -20,6 +20,7 @@
 package org.apache.hudi.examples.spark
 
 import org.apache.hudi.DataSourceWriteOptions._
+import org.apache.hudi.config.HoodieWriteConfig.FAIL_ON_TIMELINE_ARCHIVING_ENABLE
 import org.apache.spark.sql.streaming.StreamingQueryListener
 import org.apache.spark.sql.streaming.StreamingQueryListener.{QueryProgressEvent, QueryStartedEvent, QueryTerminatedEvent}
 import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
@@ -39,6 +40,7 @@ object HoodieSparkStructuredStreaming {
       .config("spark.sql.shuffle.partitions", 1)
       //      .enableHiveSupport()
       .getOrCreate()
+    spark.sparkContext.setLogLevel("ERROR") // set log levels appropriately
 
     // Add listeners, complete each batch, print information about the batch, such as start offset, grab the number of records, and process time to the console
     spark.streams.addListener(new StreamingQueryListener() {
@@ -60,10 +62,10 @@ object HoodieSparkStructuredStreaming {
       .readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", "localhost:9092")
-      .option("subscribe", "testTopic")
-    //      .option("startingOffsets", "latest")
-    //      .option("maxOffsetsPerTrigger", 100000)
-    //      .option("failOnDataLoss", false)
+      .option("subscribe", "impressions")
+      .option("startingOffsets", "earliest")
+      .option("maxOffsetsPerTrigger", 5000)
+      .option("failOnDataLoss", true)
 
     // Loading stream data, because it is only for testing purposes, reading kafka messages directly without any other processing,
     // is that spark structured streams automatically generate kafka metadata for each set of messages,
@@ -84,7 +86,7 @@ object HoodieSparkStructuredStreaming {
         "kafka_timestamp",
         "kafka_key",
         "kafka_value",
-        "substr(current_time,1,10) partition_date")
+        "substr(regexp_replace(current_time, ':', ''),1,15) partition_date") // minute-level partitions
 
     // Create and start query
     val query = df
@@ -93,40 +95,46 @@ object HoodieSparkStructuredStreaming {
       .foreachBatch { (batchDF: DataFrame, _: Long) => {
         batchDF.persist()
 
-        println(LocalDateTime.now() + "start writing cow table")
+        println(LocalDateTime.now() + " start writing cow table")
         batchDF.write.format("org.apache.hudi")
-          .option(TABLE_TYPE_OPT_KEY.key, "COPY_ON_WRITE")
-          .option(PRECOMBINE_FIELD_OPT_KEY.key, "kafka_timestamp")
+          .option(TABLE_TYPE.key, "COPY_ON_WRITE")
+          .option(PRECOMBINE_FIELD.key, "kafka_timestamp")
           // Use kafka partition and offset as combined primary key
-          .option(RECORDKEY_FIELD_OPT_KEY.key, "kafka_partition_offset")
+          .option(RECORDKEY_FIELD.key, "kafka_partition_offset")
           // Partition with current date
-          .option(PARTITIONPATH_FIELD_OPT_KEY.key, "partition_date")
-          .option(TABLE_NAME_OPT_KEY.key, "copy_on_write_table")
-          .option(HIVE_SYNC_ENABLED_OPT_KEY.key, false)
-          .option(HIVE_STYLE_PARTITIONING_OPT_KEY.key, true)
+          .option(PARTITIONPATH_FIELD.key, "partition_date")
+          .option(TABLE_NAME.key, "copy_on_write_table")
+          .option(HIVE_SYNC_ENABLED.key, false)
+          .option(HIVE_STYLE_PARTITIONING.key, true)
+          .option(FAIL_ON_TIMELINE_ARCHIVING_ENABLE.key, false)
+          .option(STREAMING_IGNORE_FAILED_BATCH.key, false)
+          .option(STREAMING_RETRY_CNT.key, 0)
           .option("hoodie.table.name", "copy_on_write_table")
           .mode(SaveMode.Append)
-          .save("/tmp/sparkHudi/COPY_ON_WRITE")
+          .save("/tmp/hudi_streaming_kafka/COPY_ON_WRITE")
 
-        println(LocalDateTime.now() + "start writing mor table")
+        println(LocalDateTime.now() + " start writing mor table")
         batchDF.write.format("org.apache.hudi")
-          .option(TABLE_TYPE_OPT_KEY.key, "MERGE_ON_READ")
-          .option(TABLE_TYPE_OPT_KEY.key, "COPY_ON_WRITE")
-          .option(PRECOMBINE_FIELD_OPT_KEY.key, "kafka_timestamp")
-          .option(RECORDKEY_FIELD_OPT_KEY.key, "kafka_partition_offset")
-          .option(PARTITIONPATH_FIELD_OPT_KEY.key, "partition_date")
-          .option(TABLE_NAME_OPT_KEY.key, "merge_on_read_table")
+          .option(TABLE_TYPE.key, "MERGE_ON_READ")
+          .option(TABLE_TYPE.key, "COPY_ON_WRITE")
+          .option(PRECOMBINE_FIELD.key, "kafka_timestamp")
+          .option(RECORDKEY_FIELD.key, "kafka_partition_offset")
+          .option(PARTITIONPATH_FIELD.key, "partition_date")
+          .option(TABLE_NAME.key, "merge_on_read_table")
           .option("hoodie.table.name", "merge_on_read_table")
-          .option(HIVE_SYNC_ENABLED_OPT_KEY.key, false)
-          .option(HIVE_STYLE_PARTITIONING_OPT_KEY.key, true)
+          .option(HIVE_SYNC_ENABLED.key, false)
+          .option(HIVE_STYLE_PARTITIONING.key, true)
+          .option(FAIL_ON_TIMELINE_ARCHIVING_ENABLE.key, false)
+          .option(STREAMING_IGNORE_FAILED_BATCH.key, false)
+          .option(STREAMING_RETRY_CNT.key, 0)
           .mode(SaveMode.Append)
-          .save("/tmp/sparkHudi/MERGE_ON_READ")
+          .save("/tmp/hudi_streaming_kafka/MERGE_ON_READ")
 
-        println(LocalDateTime.now() + "finish")
+        println(LocalDateTime.now() + " finish")
         batchDF.unpersist()
       }
       }
-      .option("checkpointLocation", "/tmp/sparkHudi/checkpoint/")
+      .option("checkpointLocation", "/tmp/hudi_streaming_kafka/checkpoint/")
       .start()
 
     query.awaitTermination()
