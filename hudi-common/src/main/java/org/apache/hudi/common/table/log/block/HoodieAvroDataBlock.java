@@ -30,11 +30,15 @@ import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.IndexedRecord;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
+import org.apache.avro.io.DatumWriter;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.reflect.ReflectData;
 import org.apache.hadoop.fs.FSDataInputStream;
+
+import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,8 +51,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import javax.annotation.Nonnull;
-
 /**
  * HoodieAvroDataBlock contains a list of records serialized using Avro. It is used with the Parquet base file format.
  */
@@ -58,18 +60,18 @@ public class HoodieAvroDataBlock extends HoodieDataBlock {
   private ThreadLocal<BinaryDecoder> decoderCache = new ThreadLocal<>();
 
   public HoodieAvroDataBlock(@Nonnull Map<HeaderMetadataType, String> logBlockHeader,
-       @Nonnull Map<HeaderMetadataType, String> logBlockFooter,
-       @Nonnull Option<HoodieLogBlockContentLocation> blockContentLocation, @Nonnull Option<byte[]> content,
-       FSDataInputStream inputStream, boolean readBlockLazily) {
+                             @Nonnull Map<HeaderMetadataType, String> logBlockFooter,
+                             @Nonnull Option<HoodieLogBlockContentLocation> blockContentLocation, @Nonnull Option<byte[]> content,
+                             FSDataInputStream inputStream, boolean readBlockLazily) {
     super(logBlockHeader, logBlockFooter, blockContentLocation, content, inputStream, readBlockLazily);
   }
 
   public HoodieAvroDataBlock(HoodieLogFile logFile, FSDataInputStream inputStream, Option<byte[]> content,
-       boolean readBlockLazily, long position, long blockSize, long blockEndpos, Schema readerSchema,
-       Map<HeaderMetadataType, String> header, Map<HeaderMetadataType, String> footer) {
+                             boolean readBlockLazily, long position, long blockSize, long blockEndpos, Schema readerSchema,
+                             Map<HeaderMetadataType, String> header, Map<HeaderMetadataType, String> footer) {
     super(content, inputStream, readBlockLazily,
-          Option.of(new HoodieLogBlockContentLocation(logFile, position, blockSize, blockEndpos)), readerSchema, header,
-          footer);
+        Option.of(new HoodieLogBlockContentLocation(logFile, position, blockSize, blockEndpos)), readerSchema, header,
+        footer);
   }
 
   public HoodieAvroDataBlock(@Nonnull List<IndexedRecord> records, @Nonnull Map<HeaderMetadataType, String> header) {
@@ -84,7 +86,8 @@ public class HoodieAvroDataBlock extends HoodieDataBlock {
   @Override
   protected byte[] serializeRecords() throws IOException {
     Schema schema = new Schema.Parser().parse(super.getLogBlockHeader().get(HeaderMetadataType.SCHEMA));
-    GenericDatumWriter<IndexedRecord> writer = new GenericDatumWriter<>(schema);
+    ReflectData reflectData = ReflectData.AllowNull.get();
+    DatumWriter<IndexedRecord> writer = reflectData.createDatumWriter(schema);
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     DataOutputStream output = new DataOutputStream(baos);
 
