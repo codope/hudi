@@ -64,7 +64,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.hudi.common.table.timeline.HoodieTimeline.CLEAN_ACTION;
 import static org.apache.hudi.common.util.CleanerUtils.convertCleanMetadata;
+import static org.apache.hudi.common.util.StringUtils.EMPTY_STRING;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -152,6 +154,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     HoodieTestDataGenerator.createCompactionAuxiliaryMetadata(basePath,
         new HoodieInstant(State.INFLIGHT, HoodieTimeline.COMPACTION_ACTION, "105"), wrapperFs.getConf());
     HoodieTestDataGenerator.createCommitFile(basePath, "105", wrapperFs.getConf());
+    syncTableMetadata(cfg);
 
     metaClient = HoodieTableMetaClient.reload(metaClient);
     HoodieTimeline timeline = metaClient.getActiveTimeline().getCommitsTimeline().filterCompletedInstants();
@@ -338,6 +341,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     HoodieTestDataGenerator.createCommitFile(basePath, "105", wrapperFs.getConf());
     HoodieTable table = HoodieSparkTable.create(cfg, context);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
+    syncTableMetadata(cfg);
 
     HoodieTimeline timeline = metaClient.getActiveTimeline().getCommitsTimeline().filterCompletedInstants();
     assertEquals(6, timeline.countInstants(), "Loaded 6 commits and the count should match");
@@ -367,7 +371,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
 
     HoodieTable table = HoodieSparkTable.create(cfg, context);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
-
+    syncTableMetadata(cfg);
     assertTrue(archiveLog.archiveIfRequired(context));
     HoodieTimeline timeline = metaClient.getActiveTimeline().reload().getCommitsTimeline().filterCompletedInstants();
     assertEquals(2, timeline.countInstants(),
@@ -400,6 +404,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     HoodieTestDataGenerator.createCommitFile(basePath, "105", wrapperFs.getConf());
     HoodieTestDataGenerator.createCommitFile(basePath, "106", wrapperFs.getConf());
     HoodieTestDataGenerator.createCommitFile(basePath, "107", wrapperFs.getConf());
+    syncTableMetadata(cfg);
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
 
@@ -450,6 +455,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     //add 2 more instants to pass filter criteria set in compaction config above
     HoodieTestDataGenerator.createCommitFile(basePath, "4", wrapperFs.getConf());
     HoodieTestDataGenerator.createCommitFile(basePath, "5", wrapperFs.getConf());
+    syncTableMetadata(cfg);
 
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
@@ -494,7 +500,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     createCleanMetadata("11", false);
     HoodieInstant notArchivedInstant1 = createCleanMetadata("12", false);
     HoodieInstant notArchivedInstant2 = createCleanMetadata("13", false);
-
+    syncTableMetadata(cfg);
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
 
@@ -522,7 +528,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
 
     createCommitAndRollbackFile("5", "13", false);
     HoodieInstant notArchivedInstant2 = new HoodieInstant(State.COMPLETED, "rollback", "13");
-
+    syncTableMetadata(cfg);
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
 
@@ -547,7 +553,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     for (int i = 0; i < maxInstants + 2; i++) {
       createCleanMetadata(i + "", false);
     }
-
+    syncTableMetadata(cfg);
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
 
@@ -595,6 +601,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     for (int i = 0; i < maxInstantsToKeep + 1; i++, startInstant += 2) {
       createCommitAndRollbackFile(startInstant + 1 + "", startInstant + "", false);
     }
+    syncTableMetadata(cfg);
 
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
     HoodieTimelineArchiveLog archiveLog = new HoodieTimelineArchiveLog(cfg, table);
@@ -624,6 +631,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
     createCleanMetadata("11", false);
     HoodieInstant notArchivedInstant1 = createCleanMetadata("12", false);
     HoodieInstant notArchivedInstant2 = createCleanMetadata("13", false);
+    syncTableMetadata(cfg);
     HoodieInstant notArchivedInstant3 = createCleanMetadata("14", true);
 
     HoodieTable table = HoodieSparkTable.create(cfg, context, metaClient);
@@ -637,7 +645,7 @@ public class TestHoodieTimelineArchiveLog extends HoodieClientTestHarness {
   }
 
   private HoodieInstant createCleanMetadata(String instantTime, boolean inflightOnly) throws IOException {
-    HoodieCleanerPlan cleanerPlan = new HoodieCleanerPlan(new HoodieActionInstant("", "", ""), "", new HashMap<>(),
+    HoodieCleanerPlan cleanerPlan = new HoodieCleanerPlan(new HoodieActionInstant(instantTime, CLEAN_ACTION, EMPTY_STRING), EMPTY_STRING, new HashMap<>(),
         CleanPlanV2MigrationHandler.VERSION, new HashMap<>());
     if (inflightOnly) {
       HoodieTestTable.of(metaClient).addInflightClean(instantTime, cleanerPlan);
