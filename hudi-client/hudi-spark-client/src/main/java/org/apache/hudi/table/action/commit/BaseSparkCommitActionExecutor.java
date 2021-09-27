@@ -295,6 +295,9 @@ public abstract class BaseSparkCommitActionExecutor<T extends HoodieRecordPayloa
       if (btype.equals(BucketType.INSERT)) {
         return handleInsert(binfo.fileIdPrefix, recordItr);
       } else if (btype.equals(BucketType.UPDATE)) {
+        if (!WriteOperationType.isChangingRecords(operationType) && config.allowDuplicateInserts()) {
+          return handleInsert(binfo.fileIdPrefix, recordItr);
+        }
         return handleUpdate(binfo.partitionPath, binfo.fileIdPrefix, recordItr);
       } else {
         throw new HoodieUpsertException("Unknown bucketType " + btype + " for partition :" + partition);
