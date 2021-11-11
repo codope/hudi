@@ -97,6 +97,22 @@ public class SparkSizeBasedClusteringPlanStrategy<T extends HoodieRecordPayload<
         .setNumOutputFileGroups(fileSliceGroup.getRight())
         .setMetrics(buildMetrics(fileSliceGroup.getLeft()))
         .build());
+
+    /*Stream<HoodieClusteringGroup> result = fileSliceGroups.stream().map(fileSliceGroup -> HoodieClusteringGroup.newBuilder()
+        .setSlices(getFileSliceInfo(fileSliceGroup.getLeft()))
+        .setNumOutputFileGroups(fileSliceGroup.getRight())
+        .setMetrics(buildMetrics(fileSliceGroup.getLeft()))
+        .build());
+
+    result.forEach(
+        clusteringGroup -> {
+          LOG.info("Build clustering group: ");
+          for (HoodieSliceInfo info : clusteringGroup.getSlices()) {
+            LOG.info("slice info: " + info.getDataFilePath());
+          }
+        }
+    );
+    return result;*/
   }
 
   @Override

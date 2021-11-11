@@ -77,6 +77,9 @@ public abstract class PartitionAwareClusteringPlanStrategy<T extends HoodieRecor
     List<HoodieClusteringGroup> clusteringGroups = getEngineContext().flatMap(partitionPaths,
         partitionPath -> {
           List<FileSlice> fileSlicesEligible = getFileSlicesEligibleForClustering(partitionPath).collect(Collectors.toList());
+          /*for (FileSlice fs : fileSlicesEligible) {
+            LOG.info(">>> Eligible file slice: " + fs.toString());
+          }*/
           return buildClusteringGroupsForPartition(partitionPath, fileSlicesEligible).limit(getWriteConfig().getClusteringMaxNumGroups());
         },
         partitionPaths.size())
