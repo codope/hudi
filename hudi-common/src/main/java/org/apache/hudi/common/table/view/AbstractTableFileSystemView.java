@@ -124,7 +124,7 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
   /**
    * Adds the provided statuses into the file system view, and also caches it inside this object.
    */
-  protected List<HoodieFileGroup> addFilesToView(FileStatus[] statuses) {
+  public List<HoodieFileGroup> addFilesToView(FileStatus[] statuses) {
     HoodieTimer timer = new HoodieTimer().startTimer();
     List<HoodieFileGroup> fileGroups = buildFileGroups(statuses, visibleCommitsAndCompactionTimeline, true);
     long fgBuildTimeTakenMs = timer.endTimer();
@@ -275,7 +275,6 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
 
           // Create the path if it does not exist already
           Path partitionPath = FSUtils.getPartitionPath(metaClient.getBasePath(), partitionPathStr);
-          FSUtils.createPathIfNotExists(metaClient.getFs(), partitionPath);
           long beginLsTs = System.currentTimeMillis();
           FileStatus[] statuses = listPartition(partitionPath);
           long endLsTs = System.currentTimeMillis();
@@ -288,6 +287,38 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
           }
         } catch (IOException e) {
           throw new HoodieIOException("Failed to list base files in partition " + partitionPathStr, e);
+        }
+      } else {
+        LOG.debug("View already built for Partition :" + partitionPathStr + ", FOUND is ");
+      }
+      long endTs = System.currentTimeMillis();
+      LOG.debug("Time to load partition (" + partitionPathStr + ") =" + (endTs - beginTs));
+      return true;
+    });
+  }
+
+  private void ensurePartitionLoadedCorrectly(String partition, FileStatus[] statuses) {
+
+    ValidationUtils.checkArgument(!isClosed(), "View is already closed");
+
+    // ensure we list files only once even in the face of concurrency
+    addedPartitions.computeIfAbsent(partition, (partitionPathStr) -> {
+      long beginTs = System.currentTimeMillis();
+      if (!isPartitionAvailableInStore(partitionPathStr)) {
+        // Not loaded yet
+        LOG.info("Building file system view for partition (" + partitionPathStr + ")");
+
+        // Create the path if it does not exist already
+        Path partitionPath = FSUtils.getPartitionPath(metaClient.getBasePath(), partitionPathStr);
+        long beginLsTs = System.currentTimeMillis();
+        //FileStatus[] statuses = listPartition(partitionPath);
+        long endLsTs = System.currentTimeMillis();
+        LOG.debug("#files found in partition (" + partitionPathStr + ") =" + statuses.length + ", Time taken ="
+            + (endLsTs - beginLsTs));
+        List<HoodieFileGroup> groups = addFilesToView(statuses);
+
+        if (groups.isEmpty()) {
+          storePartitionView(partitionPathStr, new ArrayList<>());
         }
       } else {
         LOG.debug("View already built for Partition :" + partitionPathStr + ", FOUND is ");
@@ -432,6 +463,19 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
       return fetchLatestBaseFiles(partitionPath)
           .filter(df -> !isFileGroupReplaced(partitionPath, df.getFileId()))
           .map(df -> addBootstrapBaseFileIfPresent(new HoodieFileGroupId(partitionPath, df.getFileId()), df));
+    } finally {
+      readLock.unlock();
+    }
+  }
+
+  @Override
+  public final Stream<HoodieBaseFile> getLatestBaseFiles(String partitionStr, FileStatus[] statuses) {
+    try {
+      readLock.lock();
+      String partitionPath = formatPartitionKey(partitionStr);
+      ensurePartitionLoadedCorrectly(partitionPath, statuses);
+      return fetchLatestBaseFiles(partitionPath)
+          .filter(df -> !isFileGroupReplaced(partitionPath, df.getFileId()));
     } finally {
       readLock.unlock();
     }

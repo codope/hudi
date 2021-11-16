@@ -32,6 +32,7 @@ import org.apache.hudi.common.util.Functions.Function3;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.collection.Pair;
 
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
@@ -122,6 +123,11 @@ public class PriorityBasedFileSystemView implements SyncableFileSystemView, Seri
   @Override
   public Stream<HoodieBaseFile> getLatestBaseFiles(String partitionPath) {
     return execute(partitionPath, preferredView::getLatestBaseFiles, secondaryView::getLatestBaseFiles);
+  }
+
+  @Override
+  public Stream<HoodieBaseFile> getLatestBaseFiles(String partitionPath, FileStatus[] statuses) {
+    return null;
   }
 
   @Override

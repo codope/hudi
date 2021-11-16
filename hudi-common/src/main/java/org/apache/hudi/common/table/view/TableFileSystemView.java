@@ -28,6 +28,8 @@ import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.collection.Pair;
 
+import org.apache.hadoop.fs.FileStatus;
+
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -47,6 +49,8 @@ public interface TableFileSystemView {
      * Stream all the latest data files in the given partition.
      */
     Stream<HoodieBaseFile> getLatestBaseFiles(String partitionPath);
+
+    Stream<HoodieBaseFile> getLatestBaseFiles(String partitionPath, FileStatus[] statuses);
 
     /**
      * Get Latest data file for a partition and file-Id.

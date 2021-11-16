@@ -20,6 +20,7 @@ package org.apache.hudi.common.table.view;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.http.client.fluent.Request;
 import org.apache.http.client.fluent.Response;
 import org.apache.http.client.utils.URIBuilder;
@@ -224,6 +225,11 @@ public class RemoteHoodieTableFileSystemView implements SyncableFileSystemView, 
   public Stream<HoodieBaseFile> getLatestBaseFiles(String partitionPath) {
     Map<String, String> paramsMap = getParamsWithPartitionPath(partitionPath);
     return getLatestBaseFilesFromParams(paramsMap, LATEST_PARTITION_DATA_FILES_URL);
+  }
+
+  @Override
+  public Stream<HoodieBaseFile> getLatestBaseFiles(String partitionPath, FileStatus[] statuses) {
+    return null;
   }
 
   @Override
