@@ -18,6 +18,7 @@
 
 package org.apache.hudi.cli.commands;
 
+import org.apache.hudi.avro.model.HoodieIndexPlan;
 import org.apache.hudi.cli.HoodieCLI;
 import org.apache.hudi.cli.HoodiePrintHelper;
 import org.apache.hudi.cli.TableHeader;
@@ -25,6 +26,8 @@ import org.apache.hudi.cli.utils.SparkUtil;
 import org.apache.hudi.client.common.HoodieSparkEngineContext;
 import org.apache.hudi.common.config.HoodieMetadataConfig;
 import org.apache.hudi.common.engine.HoodieLocalEngineContext;
+import org.apache.hudi.common.table.HoodieTableConfig;
+import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.util.HoodieTimer;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.ValidationUtils;
@@ -54,6 +57,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static org.apache.hudi.common.table.timeline.HoodieInstant.State.REQUESTED;
+import static org.apache.hudi.common.table.timeline.HoodieTimeline.getIndexInflightInstant;
+import static org.apache.hudi.common.table.timeline.TimelineMetadataUtils.deserializeIndexPlan;
+import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getCompletedMetadataPartitions;
+import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getInflightAndCompletedMetadataPartitions;
+import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getInflightMetadataPartitions;
 
 /**
  * CLI commands to operate on the Metadata Table.
@@ -249,6 +259,56 @@ public class MetadataCommand implements CommandMarker {
     TableHeader header = new TableHeader().addTableHeaderField("file path");
     return HoodiePrintHelper.print(header, new HashMap<>(), "",
         false, Integer.MAX_VALUE, false, rows);
+  }
+
+  @CliCommand(value = "metadata delete-partition", help = "Drop the given index and delete the metadata partition including pending indexing instant")
+  public String dropMetadataIndex(
+      @CliOption(key = {"partition"}, help = "Name of the metadata partition to delete, e.g. bloom_filters, column_stats") final String partition,
+      @CliOption(key = {"all-partitions"}, help = "Delete all partitions") final boolean deleteAllPartitions,
+      @CliOption(key = {"all-pending-index-instants"}, help = "Delete all pending index instants from the timeline") final boolean deleteAllInstants) throws Exception {
+    HoodieTableMetaClient metaClient = HoodieCLI.getTableMetaClient();
+
+    Set<String> completedIndexes = getCompletedMetadataPartitions(metaClient.getTableConfig());
+    Set<String> inflightIndexes = getInflightMetadataPartitions(metaClient.getTableConfig());
+    Set<String> partitionsToDelete = deleteAllPartitions ? getInflightAndCompletedMetadataPartitions(metaClient.getTableConfig()) : new HashSet<>(Arrays.asList(partition));
+    // TODO: loop for each partition to delete
+    for (String partitionToDelete : partitionsToDelete) {
+      // first update table config
+      if (inflightIndexes.contains(partition)) {
+        inflightIndexes.remove(partition);
+        metaClient.getTableConfig().setValue(HoodieTableConfig.TABLE_METADATA_PARTITIONS_INFLIGHT.key(), String.join(",", inflightIndexes));
+      } else if (completedIndexes.contains(partition)) {
+        completedIndexes.remove(partition);
+        metaClient.getTableConfig().setValue(HoodieTableConfig.TABLE_METADATA_PARTITIONS.key(), String.join(",", completedIndexes));
+      }
+      HoodieTableConfig.update(metaClient.getFs(), new Path(metaClient.getMetaPath()), metaClient.getTableConfig().getProps());
+      LOG.warn("Deleting Metadata Table partitions: " + partition);
+      metaClient.getFs().delete(new Path(getMetadataTableBasePath(HoodieCLI.basePath), partition), true);
+
+      // delete corresponding pending indexing instant file in the timeline
+      LOG.warn("Deleting pending indexing instant from the timeline for partition: " + partition);
+      deletePendingIndexingInstant(metaClient, partition, deleteAllInstants);
+    }
+
+    return String.format("Removed Metadata partition: %s, delete all partitions: %s, delete all instants: %s", partition, deleteAllPartitions, deleteAllInstants);
+  }
+
+  private static void deletePendingIndexingInstant(HoodieTableMetaClient metaClient, String partitionPath, boolean deleteAllInstants) {
+    metaClient.reloadActiveTimeline().filterPendingIndexTimeline().getInstants().filter(instant -> REQUESTED.equals(instant.getState()))
+        .forEach(instant -> {
+          try {
+            HoodieIndexPlan indexPlan = deserializeIndexPlan(metaClient.getActiveTimeline().readIndexPlanAsBytes(instant).get());
+            if (deleteAllInstants) {
+              metaClient.getActiveTimeline().deleteInstantFileIfExists(instant);
+            } else if (indexPlan.getIndexPartitionInfos().stream()
+                .anyMatch(indexPartitionInfo -> indexPartitionInfo.getMetadataPartitionPath().equals(partitionPath))) {
+              metaClient.getActiveTimeline().deleteInstantFileIfExists(instant);
+              metaClient.getActiveTimeline().deleteInstantFileIfExists(getIndexInflightInstant(instant.getTimestamp()));
+            }
+          } catch (IOException e) {
+            LOG.error("Failed to delete the instant file corresponding to " + instant);
+          }
+        });
   }
 
   @CliCommand(value = "metadata validate-files", help = "Validate all files in all partitions from the metadata")
