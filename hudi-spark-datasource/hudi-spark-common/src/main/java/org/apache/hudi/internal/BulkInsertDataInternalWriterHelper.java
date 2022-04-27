@@ -21,15 +21,14 @@ package org.apache.hudi.internal;
 import org.apache.hudi.DataSourceWriteOptions;
 import org.apache.hudi.client.HoodieInternalWriteStatus;
 import org.apache.hudi.common.config.TypedProperties;
-import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
-import org.apache.hudi.io.storage.row.HoodieRowCreateHandleWithoutMetaFields;
 import org.apache.hudi.io.storage.row.HoodieRowCreateHandle;
+import org.apache.hudi.io.storage.row.HoodieRowCreateHandleWithoutMetaFields;
 import org.apache.hudi.keygen.BuiltinKeyGenerator;
 import org.apache.hudi.keygen.NonpartitionedKeyGenerator;
-import org.apache.hudi.keygen.SimpleKeyGenerator;
 import org.apache.hudi.keygen.factory.HoodieSparkKeyGeneratorFactory;
 import org.apache.hudi.table.HoodieTable;
 
@@ -87,14 +86,14 @@ public class BulkInsertDataInternalWriterHelper {
     this.populateMetaFields = populateMetaFields;
     this.arePartitionRecordsSorted = arePartitionRecordsSorted;
     this.fileIdPrefix = UUID.randomUUID().toString();
-    if (!populateMetaFields) {
+    /*if (!populateMetaFields) {
       this.keyGeneratorOpt = getKeyGenerator(writeConfig.getProps());
       if (keyGeneratorOpt.isPresent() && keyGeneratorOpt.get() instanceof SimpleKeyGenerator) {
         simpleKeyGen = true;
         simplePartitionFieldIndex = (Integer) structType.getFieldIndex((keyGeneratorOpt.get()).getPartitionPathFields().get(0)).get();
         simplePartitionFieldDataType = structType.fields()[simplePartitionFieldIndex].dataType();
       }
-    }
+    }*/
   }
 
   /**
@@ -123,20 +122,21 @@ public class BulkInsertDataInternalWriterHelper {
     try {
       String partitionPath = null;
       if (populateMetaFields) { // usual path where meta fields are pre populated in prep step.
-        partitionPath = record.getUTF8String(
-            HoodieRecord.HOODIE_META_COLUMNS_NAME_TO_POS.get(HoodieRecord.PARTITION_PATH_METADATA_FIELD)).toString();
+        partitionPath = record.getUTF8String(3).toString();
       } else { // if meta columns are disabled.
-        if (!keyGeneratorOpt.isPresent()) { // NoPartitionerKeyGen
+        throw new HoodieException("should not be here");
+        /*if (!keyGeneratorOpt.isPresent()) { // NoPartitionerKeyGen
           partitionPath = "";
         } else if (simpleKeyGen) { // SimpleKeyGen
           partitionPath = (record.get(simplePartitionFieldIndex, simplePartitionFieldDataType)).toString();
         } else {
           // only BuiltIn key generators are supported if meta fields are disabled.
           partitionPath = keyGeneratorOpt.get().getPartitionPath(record, structType);
-        }
+        }*/
       }
 
-      if ((lastKnownPartitionPath == null) || !lastKnownPartitionPath.equals(partitionPath) || !handle.canWrite()) {
+      // if ((lastKnownPartitionPath == null) || !lastKnownPartitionPath.equals(partitionPath) || !handle.canWrite()) {
+      if ((lastKnownPartitionPath == null) || !handle.canWrite()) {
         LOG.info("Creating new file for partition path " + partitionPath);
         handle = getRowCreateHandle(partitionPath);
         lastKnownPartitionPath = partitionPath;
@@ -179,6 +179,7 @@ public class BulkInsertDataInternalWriterHelper {
   }
 
   public void close() throws IOException {
+    LOG.warn("Closing handles: " + handles.size());
     for (HoodieRowCreateHandle rowCreateHandle : handles.values()) {
       writeStatusList.add(rowCreateHandle.close());
     }
