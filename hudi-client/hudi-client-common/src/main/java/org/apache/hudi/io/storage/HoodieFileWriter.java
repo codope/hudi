@@ -18,7 +18,6 @@
 
 package org.apache.hudi.io.storage;
 
-import java.util.concurrent.atomic.AtomicLong;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.hudi.avro.HoodieAvroUtils;
 import org.apache.hudi.common.model.HoodieKey;
@@ -38,8 +37,8 @@ public interface HoodieFileWriter<R extends IndexedRecord> {
 
   void writeAvro(String key, R oldRecord) throws IOException;
 
-  default void prepRecordWithMetadata(HoodieKey key, R avroRecord, String instantTime, Integer partitionId, AtomicLong recordIndex, String fileName) {
-    String seqId = HoodieRecord.generateSequenceId(instantTime, partitionId, recordIndex.getAndIncrement());
+  default void prepRecordWithMetadata(HoodieKey key, R avroRecord, String instantTime, Integer partitionId, long recordIndex, String fileName) {
+    String seqId = HoodieRecord.generateSequenceId(instantTime, partitionId, recordIndex);
     HoodieAvroUtils.addHoodieKeyToRecord((GenericRecord) avroRecord, key.getRecordKey(), key.getPartitionPath(), fileName);
     HoodieAvroUtils.addCommitMetadataToRecord((GenericRecord) avroRecord, instantTime, seqId);
     return;
