@@ -102,13 +102,13 @@ public class DynamoDBBasedLockProvider implements LockProvider<LockItem> {
 
   @Override
   public boolean tryLock(long time, TimeUnit unit) {
-    LOG.info(generateLogStatement(LockState.ACQUIRING, generateLogSuffixString()));
+    LOG.warn(generateLogStatement(LockState.ACQUIRING, generateLogSuffixString()));
     try {
       lock = client.acquireLock(AcquireLockOptions.builder(dynamoDBPartitionKey)
               .withAdditionalTimeToWaitForLock(time)
               .withTimeUnit(TimeUnit.MILLISECONDS)
               .build());
-      LOG.info(generateLogStatement(LockState.ACQUIRED, generateLogSuffixString()));
+      LOG.warn(generateLogStatement(LockState.ACQUIRED, generateLogSuffixString()));
     } catch (InterruptedException e) {
       throw new HoodieLockException(generateLogStatement(LockState.FAILED_TO_ACQUIRE, generateLogSuffixString()), e);
     } catch (LockNotGrantedException e) {
@@ -120,7 +120,7 @@ public class DynamoDBBasedLockProvider implements LockProvider<LockItem> {
   @Override
   public void unlock() {
     try {
-      LOG.info(generateLogStatement(LockState.RELEASING, generateLogSuffixString()));
+      LOG.warn(generateLogStatement(LockState.RELEASING, generateLogSuffixString()));
       if (lock == null) {
         return;
       }
@@ -128,7 +128,7 @@ public class DynamoDBBasedLockProvider implements LockProvider<LockItem> {
         LOG.warn("The lock has already been stolen");
       }
       lock = null;
-      LOG.info(generateLogStatement(LockState.RELEASED, generateLogSuffixString()));
+      LOG.warn(generateLogStatement(LockState.RELEASED, generateLogSuffixString()));
     } catch (Exception e) {
       throw new HoodieLockException(generateLogStatement(LockState.FAILED_TO_RELEASE, generateLogSuffixString()), e);
     }
@@ -189,7 +189,7 @@ public class DynamoDBBasedLockProvider implements LockProvider<LockItem> {
     }
     dynamoDB.createTable(createTableRequest);
 
-    LOG.info("Creating dynamoDB table " + tableName + ", waiting for table to be active");
+    LOG.warn("Creating dynamoDB table " + tableName + ", waiting for table to be active");
     try {
       TableUtils.waitUntilActive(dynamoDB, tableName, Integer.parseInt(lockConfiguration.getConfig().getString(DynamoDbBasedLockConfig.DYNAMODB_LOCK_TABLE_CREATION_TIMEOUT.key())), 20 * 1000);
     } catch (TableUtils.TableNeverTransitionedToStateException e) {
@@ -197,7 +197,7 @@ public class DynamoDBBasedLockProvider implements LockProvider<LockItem> {
     } catch (InterruptedException e) {
       throw new HoodieLockException("Thread interrupted while waiting for dynamoDB table to turn active", e);
     }
-    LOG.info("Created dynamoDB table " + tableName);
+    LOG.warn("Created dynamoDB table " + tableName);
   }
 
   private void checkRequiredProps(final LockConfiguration config) {
