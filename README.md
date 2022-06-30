@@ -32,6 +32,10 @@ analytical datasets on DFS (Cloud stores, HDFS or any Hadoop FileSystem compatib
 [![Join on Slack](https://img.shields.io/badge/slack-%23hudi-72eff8?logo=slack&color=48c628&label=Join%20on%20Slack)](https://join.slack.com/t/apache-hudi/shared_invite/enQtODYyNDAxNzc5MTg2LTE5OTBlYmVhYjM0N2ZhOTJjOWM4YzBmMWU2MjZjMGE4NDc5ZDFiOGQ2N2VkYTVkNzU3ZDQ4OTI1NmFmYWQ0NzE)
 ![Twitter Follow](https://img.shields.io/twitter/follow/ApacheHudi)
 
+| **Stargazers Over Time**                                                                          | **Contributors Over Time**                                                                                                                                                                                            |
+|:-------------------------------------------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
+| [![Stargazers over time](https://starchart.cc/apache/hudi.svg)](https://starchart.cc/apache/hudi) | [![Contributors Over Time](https://contributor-overtime-api.git-contributor.com/contributors-svg?chart=contributorOverTime&repo=apache/hudi)](https://git-contributor.com?chart=contributorOverTime&repo=apache/hudi) |
+
 ## Features
 
 * Upsert support with fast, pluggable indexing
