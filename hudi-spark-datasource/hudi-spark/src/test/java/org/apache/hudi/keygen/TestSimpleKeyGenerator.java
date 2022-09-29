@@ -141,8 +141,35 @@ public class TestSimpleKeyGenerator extends KeyGeneratorTestUtilities {
   }
 
   private static Stream<GenericRecord> nestedColTestRecords() {
-    return Stream.of(null, getNestedColRecord(null, 10L),
+    return Stream.of(getNestedColRecord("val4", 10L), getNestedColRecord(null, 10L),
         getNestedColRecord("", 10L), getNestedColRecord("val1", 10L));
+  }
+
+  private TypedProperties getPropsWithNestedRecordKeyField() {
+    TypedProperties properties = getCommonProps();
+    properties.put(KeyGeneratorOptions.PARTITIONPATH_FIELD_NAME.key(), "nested_col.prop1:SIMPLE");
+    properties.put(KeyGeneratorOptions.RECORDKEY_FIELD_NAME.key(), "nested_col.prop2");
+    return properties;
+  }
+
+  @ParameterizedTest
+  @MethodSource("nestedColTestRecords")
+  public void testNestedRecordKeyField(GenericRecord nestedColRecord) {
+    CustomKeyGenerator keyGenerator = new CustomKeyGenerator(getPropsWithNestedRecordKeyField());
+    GenericRecord record = getRecord(nestedColRecord);
+    String partitionPathFieldValue = null;
+    if (nestedColRecord != null) {
+      partitionPathFieldValue = (String) nestedColRecord.get("prop1");
+    }
+    String expectedPartitionPath = "nested_col.prop1="
+        + (partitionPathFieldValue != null && !partitionPathFieldValue.isEmpty() ? partitionPathFieldValue : HUDI_DEFAULT_PARTITION_PATH);
+    HoodieKey key = keyGenerator.getKey(record);
+    Assertions.assertEquals("10", key.getRecordKey());
+    Assertions.assertEquals(expectedPartitionPath, key.getPartitionPath());
+
+    Row row = KeyGeneratorTestUtilities.getRow(record);
+    Assertions.assertEquals("10", keyGenerator.getRecordKey(row));
+    Assertions.assertEquals(expectedPartitionPath, keyGenerator.getPartitionPath(row));
   }
 
   @ParameterizedTest
