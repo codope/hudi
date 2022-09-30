@@ -95,6 +95,7 @@
                   <include>org.apache.httpcomponents:fluent-hc</include>
                   <include>org.antlr:stringtemplate</include>
                   <include>org.apache.parquet:parquet-avro</include>
+                  <include>org.apache.avro:avro</include>
 
                   <include>com.github.davidmoten:guava-mini</include>
                   <include>com.github.davidmoten:hilbert-curve</include>
@@ -224,6 +225,10 @@
                 <relocation>
                   <pattern>org.openjdk.jol.</pattern>
                   <shadedPattern>org.apache.hudi.org.openjdk.jol.</shadedPattern>
+                </relocation>
+                <relocation>
+                  <pattern>org.apache.avro.</pattern>
+                  <shadedPattern>org.apache.hudi.org.apache.avro.</shadedPattern>
                 </relocation>
                 <!-- TODO: Revisit GH ISSUE #533 & PR#633-->
                 <!-- The classes below in org.apache.hadoop.metrics2 package come from
@@ -360,6 +365,14 @@
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-avro</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
+    <!-- Avro -->
+    <dependency>
+      <groupId>org.apache.avro</groupId>
+      <artifactId>avro</artifactId>
+      <version>${avro.version}</version>
       <scope>compile</scope>
     </dependency>
 
