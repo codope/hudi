@@ -211,6 +211,7 @@
     <springboot.version>2.7.3</springboot.version>
     <spring.shell.version>2.1.1</spring.shell.version>
     <snappy.version>1.1.8.3</snappy.version>
+    <arrow.version>9.0.0</arrow.version>
   </properties>
 
   <scm>
@@ -828,6 +829,23 @@
             <artifactId>log4j</artifactId>
           </exclusion>
         </exclusions>
+      </dependency>
+
+      <!-- Arrow -->
+      <dependency>
+        <groupId>org.apache.arrow</groupId>
+        <artifactId>arrow-memory-core</artifactId>
+        <version>${arrow.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.arrow</groupId>
+        <artifactId>arrow-memory-netty</artifactId>
+        <version>${arrow.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.arrow</groupId>
+        <artifactId>arrow-vector</artifactId>
+        <version>${arrow.version}</version>
       </dependency>
 
       <!-- Spark -->

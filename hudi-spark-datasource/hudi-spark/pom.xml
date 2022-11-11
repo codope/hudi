@@ -243,6 +243,20 @@
       <artifactId>parquet-avro</artifactId>
     </dependency>
 
+    <!-- Arrow -->
+    <dependency>
+      <groupId>org.apache.arrow</groupId>
+      <artifactId>arrow-memory-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.arrow</groupId>
+      <artifactId>arrow-memory-netty</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.arrow</groupId>
+      <artifactId>arrow-vector</artifactId>
+    </dependency>
+
     <!-- Spark -->
     <dependency>
       <groupId>org.apache.spark</groupId>
