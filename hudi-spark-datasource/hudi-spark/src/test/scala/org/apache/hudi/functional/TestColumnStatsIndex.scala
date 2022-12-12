@@ -19,7 +19,7 @@
 package org.apache.hudi.functional
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{LocatedFileStatus, Path}
+import org.apache.hadoop.fs.Path
 import org.apache.hudi.ColumnStatsIndexSupport.composeIndexSchema
 import org.apache.hudi.DataSourceWriteOptions.{PRECOMBINE_FIELD, RECORDKEY_FIELD}
 import org.apache.hudi.HoodieConversionUtils.toProperties
@@ -30,9 +30,9 @@ import org.apache.hudi.common.util.ParquetUtils
 import org.apache.hudi.config.{HoodieStorageConfig, HoodieWriteConfig}
 import org.apache.hudi.functional.TestColumnStatsIndex.ColumnStatsTestCase
 import org.apache.hudi.testutils.HoodieClientTestBase
+import org.apache.hudi.util.ColumnStatsTestUtils._
 import org.apache.hudi.{ColumnStatsIndexSupport, DataSourceWriteOptions}
 import org.apache.spark.sql._
-import org.apache.spark.sql.functions.typedLit
 import org.apache.spark.sql.types._
 import org.junit.jupiter.api.Assertions.{assertEquals, assertNotNull, assertTrue}
 import org.junit.jupiter.api._
@@ -85,11 +85,12 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
       HoodieMetadataConfig.ENABLE_METADATA_INDEX_COLUMN_STATS.key -> "true"
     )
 
+    val tableType = HoodieTableType.COPY_ON_WRITE
     val commonOpts = Map(
       "hoodie.insert.shuffle.parallelism" -> "4",
       "hoodie.upsert.shuffle.parallelism" -> "4",
       HoodieWriteConfig.TBL_NAME.key -> "hoodie_test",
-      DataSourceWriteOptions.TABLE_TYPE.key -> testCase.tableType.toString,
+      DataSourceWriteOptions.TABLE_TYPE.key -> tableType.toString,
       RECORDKEY_FIELD.key -> "c1",
       PRECOMBINE_FIELD.key -> "c1",
       // NOTE: Currently only this setting is used like following by different MT partitions:
@@ -99,13 +100,13 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
       HoodieTableConfig.POPULATE_META_FIELDS.key -> "true"
     ) ++ metadataOpts
 
-    doWriteAndValidateColumnStats(testCase, metadataOpts, commonOpts,
+    doWriteAndValidateColumnStats(tableType, testCase.shouldReadInMemory, metadataOpts, commonOpts,
       dataSourcePath = "index/colstats/input-table-json",
       expectedColStatsSourcePath = "index/colstats/column-stats-index-table.json",
       operation = DataSourceWriteOptions.INSERT_OPERATION_OPT_VAL,
       saveMode = SaveMode.Overwrite)
 
-    doWriteAndValidateColumnStats(testCase, metadataOpts, commonOpts,
+    doWriteAndValidateColumnStats(tableType, testCase.shouldReadInMemory, metadataOpts, commonOpts,
       dataSourcePath = "index/colstats/another-input-table-json",
       expectedColStatsSourcePath = "index/colstats/updated-column-stats-index-table.json",
       operation = DataSourceWriteOptions.INSERT_OPERATION_OPT_VAL,
@@ -113,13 +114,9 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
 
     // NOTE: MOR and COW have different fixtures since MOR is bearing delta-log files (holding
     //       deferred updates), diverging from COW
-    val expectedColStatsSourcePath = if (testCase.tableType == HoodieTableType.COPY_ON_WRITE) {
-      "index/colstats/cow-updated2-column-stats-index-table.json"
-    } else {
-      "index/colstats/mor-updated2-column-stats-index-table.json"
-    }
+    val expectedColStatsSourcePath = "index/colstats/cow-updated2-column-stats-index-table.json"
 
-    doWriteAndValidateColumnStats(testCase, metadataOpts, commonOpts,
+    doWriteAndValidateColumnStats(tableType, testCase.shouldReadInMemory, metadataOpts, commonOpts,
       dataSourcePath = "index/colstats/update-input-table-json",
       expectedColStatsSourcePath = expectedColStatsSourcePath,
       operation = DataSourceWriteOptions.UPSERT_OPERATION_OPT_VAL,
@@ -204,7 +201,7 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
 
       // Collect Column Stats manually (reading individual Parquet files)
       val manualColStatsTableDF =
-        buildColumnStatsTableManually(basePath, requestedColumns, targetColumnsToIndex, expectedColStatsSchema)
+        buildColumnStatsTableManually(basePath, requestedColumns, targetColumnsToIndex, expectedColStatsSchema, spark, fs, sourceTableSchema)
 
       val columnStatsIndex = new ColumnStatsIndexSupport(spark, sourceTableSchema, metadataConfig, metaClient)
 
@@ -256,7 +253,7 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
 
       // Collect Column Stats manually (reading individual Parquet files)
       val manualUpdatedColStatsTableDF =
-        buildColumnStatsTableManually(basePath, requestedColumns, targetColumnsToIndex, expectedColStatsSchema)
+        buildColumnStatsTableManually(basePath, requestedColumns, targetColumnsToIndex, expectedColStatsSchema, spark, fs, sourceTableSchema)
 
       val columnStatsIndex = new ColumnStatsIndexSupport(spark, sourceTableSchema, metadataConfig, metaClient)
 
@@ -310,7 +307,8 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
     })
   }
 
-  private def doWriteAndValidateColumnStats(testCase: ColumnStatsTestCase,
+  private def doWriteAndValidateColumnStats(tableType: HoodieTableType,
+                                            shouldReadInMemory: Boolean,
                                             metadataOpts: Map[String, String],
                                             hudiOpts: Map[String, String],
                                             dataSourcePath: String,
@@ -338,14 +336,14 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
     // Currently, routine manually validating the column stats (by actually reading every column of every file)
     // only supports parquet files. Therefore we skip such validation when delta-log files are present, and only
     // validate in following cases: (1) COW: all operations; (2) MOR: insert only.
-    val shouldValidateColumnStatsManually = testCase.tableType == HoodieTableType.COPY_ON_WRITE ||
+    val shouldValidateColumnStatsManually = tableType == HoodieTableType.COPY_ON_WRITE ||
       operation.equals(DataSourceWriteOptions.INSERT_OPERATION_OPT_VAL)
 
-    validateColumnStatsIndex(
-      testCase, metadataOpts, expectedColStatsSourcePath, shouldValidateColumnStatsManually)
+    validateColumnStatsIndex(shouldReadInMemory, metadataOpts, expectedColStatsSourcePath,
+      shouldValidateColumnStatsManually, spark, fs, sourceTableSchema, metaClient, basePath)
   }
 
-  private def buildColumnStatsTableManually(tablePath: String,
+  /*private def buildColumnStatsTableManually(tablePath: String,
                                             includedCols: Seq[String],
                                             indexedCols: Seq[String],
                                             indexSchema: StructType): DataFrame = {
@@ -363,7 +361,7 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
         val df = spark.read.schema(sourceTableSchema).parquet(file.getPath.toString)
         val exprs: Seq[String] =
           s"'${typedLit(file.getPath.getName)}' AS file" +:
-          s"sum(1) AS valueCount" +:
+            s"sum(1) AS valueCount" +:
             df.columns
               .filter(col => includedCols.contains(col))
               .flatMap(col => {
@@ -391,7 +389,7 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
     )
   }
 
-  private def validateColumnStatsIndex(testCase: ColumnStatsTestCase,
+  private def validateColumnStatsIndex(shouldReadInMemory: Boolean,
                                        metadataOpts: Map[String, String],
                                        expectedColStatsSourcePath: String,
                                        validateColumnStatsManually: Boolean): Unit = {
@@ -404,7 +402,7 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
     val expectedColStatsSchema = composeIndexSchema(sourceTableSchema.fieldNames, sourceTableSchema)
     val validationSortColumns = Seq("c1_maxValue", "c1_minValue", "c2_maxValue", "c2_minValue")
 
-    columnStatsIndex.loadTransposed(sourceTableSchema.fieldNames, testCase.shouldReadInMemory) { transposedColStatsDF =>
+    columnStatsIndex.loadTransposed(sourceTableSchema.fieldNames, shouldReadInMemory) { transposedColStatsDF =>
       // Match against expected column stats table
       val expectedColStatsIndexTableDf =
         spark.read
@@ -421,14 +419,14 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
       if (validateColumnStatsManually) {
         // TODO(HUDI-4557): support validation of column stats of avro log files
         // Collect Column Stats manually (reading individual Parquet files)
-        val manualColStatsTableDF =
-          buildColumnStatsTableManually(basePath, sourceTableSchema.fieldNames, sourceTableSchema.fieldNames, expectedColStatsSchema)
+        val manualColStatsTableDF = ColumnStatsTestUtils.buildColumnStatsTableManually(
+          basePath, sourceTableSchema.fieldNames, sourceTableSchema.fieldNames, expectedColStatsSchema, spark, fs, sourceTableSchema)
 
         assertEquals(asJson(sort(manualColStatsTableDF, validationSortColumns)),
           asJson(sort(transposedColStatsDF, validationSortColumns)))
       }
     }
-  }
+  }*/
 
   private def generateRandomDataFrame(spark: SparkSession): DataFrame = {
     val sourceTableSchema =
@@ -466,7 +464,7 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
     spark.createDataFrame(rdd, sourceTableSchema)
   }
 
-  private def asJson(df: DataFrame) =
+  /*private def asJson(df: DataFrame) =
     df.toJSON
       .select("value")
       .collect()
@@ -484,19 +482,19 @@ class TestColumnStatsIndex extends HoodieClientTestBase {
     // value of the first column)
     df.select(sortedCols.head, sortedCols.tail: _*)
       .sort(sortColumns.head, sortColumns.tail: _*)
-  }
+  }*/
 }
 
 object TestColumnStatsIndex {
 
-  case class ColumnStatsTestCase(tableType: HoodieTableType, forceFullLogScan: Boolean, shouldReadInMemory: Boolean)
+  case class ColumnStatsTestCase(forceFullLogScan: Boolean, shouldReadInMemory: Boolean)
 
   def testMetadataColumnStatsIndexParams: java.util.stream.Stream[Arguments] = {
-    java.util.stream.Stream.of(HoodieTableType.values().toStream.flatMap(tableType =>
-      Seq(Arguments.arguments(ColumnStatsTestCase(tableType, forceFullLogScan = false, shouldReadInMemory = true)),
-        Arguments.arguments(ColumnStatsTestCase(tableType, forceFullLogScan = false, shouldReadInMemory = false)),
-        Arguments.arguments(ColumnStatsTestCase(tableType, forceFullLogScan = true, shouldReadInMemory = false)),
-        Arguments.arguments(ColumnStatsTestCase(tableType, forceFullLogScan = true, shouldReadInMemory = true)))
-    ): _*)
+    java.util.stream.Stream.of(
+      Arguments.arguments(ColumnStatsTestCase(forceFullLogScan = false, shouldReadInMemory = true)),
+      Arguments.arguments(ColumnStatsTestCase(forceFullLogScan = false, shouldReadInMemory = false)),
+      Arguments.arguments(ColumnStatsTestCase(forceFullLogScan = true, shouldReadInMemory = false)),
+      Arguments.arguments(ColumnStatsTestCase(forceFullLogScan = true, shouldReadInMemory = true))
+    )
   }
 }
