@@ -27,13 +27,13 @@ import java.io.Serializable;
 /**
  * Client will run one round of clustering.
  */
-public abstract class BaseClusterer<T, I, K, O> implements Serializable {
+public abstract class BaseClusteringClient<T, I, K, O> implements Serializable {
 
   private static final long serialVersionUID = 1L;
 
   protected transient BaseHoodieWriteClient<T, I, K, O> clusteringClient;
 
-  public BaseClusterer(BaseHoodieWriteClient<T, I, K, O> clusteringClient) {
+  public BaseClusteringClient(BaseHoodieWriteClient<T, I, K, O> clusteringClient) {
     this.clusteringClient = clusteringClient;
   }
 

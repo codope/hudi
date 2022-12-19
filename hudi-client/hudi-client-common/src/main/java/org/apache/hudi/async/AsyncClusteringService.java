@@ -19,7 +19,7 @@
 
 package org.apache.hudi.async;
 
-import org.apache.hudi.client.BaseClusterer;
+import org.apache.hudi.client.BaseClusteringClient;
 import org.apache.hudi.client.BaseHoodieWriteClient;
 import org.apache.hudi.common.engine.EngineProperty;
 import org.apache.hudi.common.engine.HoodieEngineContext;
@@ -48,7 +48,7 @@ public abstract class AsyncClusteringService extends HoodieAsyncTableService {
   private static final Logger LOG = LogManager.getLogger(AsyncClusteringService.class);
   private final int maxConcurrentClustering;
   protected transient HoodieEngineContext context;
-  private transient BaseClusterer clusteringClient;
+  private final transient BaseClusteringClient clusteringClient;
 
   public AsyncClusteringService(HoodieEngineContext context, BaseHoodieWriteClient writeClient) {
     this(context, writeClient, false);
@@ -61,7 +61,7 @@ public abstract class AsyncClusteringService extends HoodieAsyncTableService {
     this.context = context;
   }
 
-  protected abstract BaseClusterer createClusteringClient(BaseHoodieWriteClient client);
+  protected abstract BaseClusteringClient createClusteringClient(BaseHoodieWriteClient client);
 
   /**
    * Start clustering service.

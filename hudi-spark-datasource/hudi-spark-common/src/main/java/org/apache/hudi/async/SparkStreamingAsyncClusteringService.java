@@ -19,7 +19,7 @@
 
 package org.apache.hudi.async;
 
-import org.apache.hudi.client.BaseClusterer;
+import org.apache.hudi.client.BaseClusteringClient;
 import org.apache.hudi.client.BaseHoodieWriteClient;
 import org.apache.hudi.client.HoodieSparkClusteringClient;
 import org.apache.hudi.common.engine.HoodieEngineContext;
@@ -37,7 +37,7 @@ public class SparkStreamingAsyncClusteringService extends AsyncClusteringService
   }
 
   @Override
-  protected BaseClusterer createClusteringClient(BaseHoodieWriteClient client) {
+  protected BaseClusteringClient createClusteringClient(BaseHoodieWriteClient client) {
     return new HoodieSparkClusteringClient(client);
   }
 }
