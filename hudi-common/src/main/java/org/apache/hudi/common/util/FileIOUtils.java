@@ -42,6 +42,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 /**
@@ -239,5 +240,25 @@ public class FileIOUtils {
       throw new HoodieIOException("Yarn Local dirs can't be empty");
     }
     return localDirs;
+  }
+
+  /**
+   * Kill with probability of 1/denom
+   *
+   * @param signalFilePath
+   * @param msg
+   * @param denom
+   */
+  public static void killJVMIfDesired(String signalFilePath, String msg, int denom) {
+    try {
+      boolean kill = new Random().nextInt(denom) == 0;
+      if (kill) {
+        System.out.println("Killing the jvm at " + signalFilePath + " Reason: " + msg);
+        System.exit(1);
+      }
+    } catch (Exception e) {
+      System.err.println(">>> error killing the jvm at " + signalFilePath + " ...");
+      e.printStackTrace();
+    }
   }
 }
