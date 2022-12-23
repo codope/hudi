@@ -659,6 +659,22 @@ public abstract class BaseHoodieWriteClient<T, I, K, O> extends BaseHoodieClient
     }
   }
 
+  protected void autoRollbackFailedWrites() {
+    if (!config.isAutoClean()) {
+      return;
+    }
+
+    if (config.isAsyncClean()) {
+      LOG.info("Async cleaner has been spawned. Waiting for it to finish");
+      AsyncCleanerService.waitForCompletion(asyncCleanerService);
+      LOG.info("Async cleaner has finished");
+    } else {
+      LOG.info("Start to clean synchronously.");
+      // Do not reuse instantTime for clean as metadata table requires all changes to have unique instant timestamps.
+      clean(true);
+    }
+  }
+
   protected void autoArchiveOnCommit(HoodieTable table, boolean acquireLockForArchival) {
     if (!config.isAutoArchive()) {
       return;
@@ -1204,25 +1220,25 @@ public abstract class BaseHoodieWriteClient<T, I, K, O> extends BaseHoodieClient
    * @return map of pending commits to be rolled-back instants to Rollback Instant and Rollback plan Pair.
    */
   protected Map<String, Option<HoodiePendingRollbackInfo>> getPendingRollbackInfos(HoodieTableMetaClient metaClient, boolean ignoreCompactionAndClusteringInstants) {
-    List<HoodieInstant> instants = metaClient.getActiveTimeline().filterPendingRollbackTimeline().getInstants();
+    List<HoodieInstant> pendingRollbackInstants = metaClient.getActiveTimeline().filterPendingRollbackTimeline().getInstants();
     Map<String, Option<HoodiePendingRollbackInfo>> infoMap = new HashMap<>();
-    for (HoodieInstant rollbackInstant : instants) {
+    for (HoodieInstant pendingRollbackInstant : pendingRollbackInstants) {
       HoodieRollbackPlan rollbackPlan;
       try {
-        rollbackPlan = RollbackUtils.getRollbackPlan(metaClient, rollbackInstant);
+        rollbackPlan = RollbackUtils.getRollbackPlan(metaClient, pendingRollbackInstant);
       } catch (Exception e) {
-        if (rollbackInstant.isRequested()) {
-          LOG.warn("Fetching rollback plan failed for " + rollbackInstant + ", deleting the plan since it's in REQUESTED state", e);
+        if (pendingRollbackInstant.isRequested()) {
+          LOG.warn("Fetching rollback plan failed for " + pendingRollbackInstant + ", deleting the plan since it's in REQUESTED state", e);
           try {
-            metaClient.getActiveTimeline().deletePending(rollbackInstant);
+            metaClient.getActiveTimeline().deletePending(pendingRollbackInstant);
           } catch (HoodieIOException he) {
-            LOG.warn("Cannot delete " + rollbackInstant, he);
+            LOG.warn("Cannot delete " + pendingRollbackInstant, he);
             continue;
           }
         } else {
           // Here we assume that if the rollback is inflight, the rollback plan is intact
           // in instant.rollback.requested.  The exception here can be due to other reasons.
-          LOG.warn("Fetching rollback plan failed for " + rollbackInstant + ", skip the plan", e);
+          LOG.warn("Fetching rollback plan failed for " + pendingRollbackInstant + ", skip the plan", e);
         }
         continue;
       }
@@ -1236,14 +1252,14 @@ public abstract class BaseHoodieWriteClient<T, I, K, O> extends BaseHoodieClient
                 rollbackPlan.getInstantToRollback().getCommitTime())).isPresent();
             if (!isClustering) {
               String instantToRollback = rollbackPlan.getInstantToRollback().getCommitTime();
-              infoMap.putIfAbsent(instantToRollback, Option.of(new HoodiePendingRollbackInfo(rollbackInstant, rollbackPlan)));
+              infoMap.putIfAbsent(instantToRollback, Option.of(new HoodiePendingRollbackInfo(pendingRollbackInstant, rollbackPlan)));
             }
           }
         } else {
-          infoMap.putIfAbsent(rollbackPlan.getInstantToRollback().getCommitTime(), Option.of(new HoodiePendingRollbackInfo(rollbackInstant, rollbackPlan)));
+          infoMap.putIfAbsent(rollbackPlan.getInstantToRollback().getCommitTime(), Option.of(new HoodiePendingRollbackInfo(pendingRollbackInstant, rollbackPlan)));
         }
       } catch (Exception e) {
-        LOG.warn("Processing rollback plan failed for " + rollbackInstant + ", skip the plan", e);
+        LOG.warn("Processing rollback plan failed for " + pendingRollbackInstant + ", skip the plan", e);
       }
     }
     return infoMap;
