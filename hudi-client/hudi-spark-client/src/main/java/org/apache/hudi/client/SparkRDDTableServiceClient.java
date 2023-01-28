@@ -116,19 +116,23 @@ public class SparkRDDTableServiceClient<T> extends BaseHoodieTableServiceClient<
     List<HoodieWriteStat> writeStats = metadata.getWriteStats();
     final HoodieInstant compactionInstant = HoodieTimeline.getCompactionInflightInstant(compactionCommitTime);
     try {
-      if (!basePath.contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail82_dt_compaction.txt", "Fail data table compaction before applying to MDT " + compactionCommitTime, 6);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (!basePath.contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail82_dt_compaction.txt", "Fail data table compaction before applying to MDT " + compactionCommitTime, 6);
+        }
       }
       this.txnManager.beginTransaction(Option.of(compactionInstant), Option.empty());
       finalizeWrite(table, compactionCommitTime, writeStats);
       // commit to data table after committing to metadata table.
       updateTableMetadata(table, metadata, compactionInstant);
       LOG.info("Committing Compaction " + compactionCommitTime + ". Finished with result " + metadata);
-      if (basePath.contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail82_mt_compaction.txt", "Fail metadata table compaction " + compactionCommitTime, 6);
-      } else {
-        killJVMIfDesired("/tmp/fail82_dt_compaction.txt", "Fail data table compaction after applying to MDT, but before completing in DT "
-            + compactionCommitTime, 6);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (basePath.contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail82_mt_compaction.txt", "Fail metadata table compaction " + compactionCommitTime, 6);
+        } else {
+          killJVMIfDesired("/tmp/fail82_dt_compaction.txt", "Fail data table compaction after applying to MDT, but before completing in DT "
+              + compactionCommitTime, 6);
+        }
       }
       CompactHelpers.getInstance().completeInflightCompaction(table, compactionCommitTime, metadata);
     } finally {
@@ -229,8 +233,10 @@ public class SparkRDDTableServiceClient<T> extends BaseHoodieTableServiceClient<
 
     final HoodieInstant clusteringInstant = HoodieTimeline.getReplaceCommitInflightInstant(clusteringCommitTime);
     try {
-      if (!basePath.contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail81_dt_clustering.txt", "Fail data table clustering before applying to MDT " + clusteringCommitTime, 6);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (!basePath.contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail81_dt_clustering.txt", "Fail data table clustering before applying to MDT " + clusteringCommitTime, 6);
+        }
       }
       this.txnManager.beginTransaction(Option.of(clusteringInstant), Option.empty());
 
@@ -240,11 +246,13 @@ public class SparkRDDTableServiceClient<T> extends BaseHoodieTableServiceClient<
 
       LOG.info("Committing Clustering " + clusteringCommitTime + ". Finished with result " + metadata);
 
-      if (basePath.contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail81_mt_clustering.txt", "Fail metadata table clustering " + clusteringCommitTime, 6);
-      } else {
-        killJVMIfDesired("/tmp/fail81_dt_clustering.txt", "Fail data table clustering after applying to MDT, but before completing in DT "
-            + clusteringCommitTime, 6);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (basePath.contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail81_mt_clustering.txt", "Fail metadata table clustering " + clusteringCommitTime, 6);
+        } else {
+          killJVMIfDesired("/tmp/fail81_dt_clustering.txt", "Fail data table clustering after applying to MDT, but before completing in DT "
+              + clusteringCommitTime, 6);
+        }
       }
 
       table.getActiveTimeline().transitionReplaceInflightToComplete(

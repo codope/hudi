@@ -271,10 +271,12 @@ public abstract class BaseSparkCommitActionExecutor<T> extends
   protected void updateIndexAndCommitIfNeeded(HoodieData<WriteStatus> writeStatusRDD, HoodieWriteMetadata<HoodieData<WriteStatus>> result) {
     updateIndex(writeStatusRDD, result);
     result.setPartitionToReplaceFileIds(getPartitionToReplacedFileIds(result));
-    if (config.getBasePath().contains(".hoodie/metadata")) {
-      killJVMIfDesired("/tmp/fail2_mt_write.txt", "Fail metadata table writing before commit " + instantTime, 8);
-    } else {
-      killJVMIfDesired("/tmp/fail1_dt_write.txt", "Fail data table writing before commit " + instantTime, 8);
+    if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+      if (config.getBasePath().contains(".hoodie/metadata")) {
+        killJVMIfDesired("/tmp/fail2_mt_write.txt", "Fail metadata table writing before commit " + instantTime, 8);
+      } else {
+        killJVMIfDesired("/tmp/fail1_dt_write.txt", "Fail data table writing before commit " + instantTime, 8);
+      }
     }
     commitOnAutoCommit(result);
   }

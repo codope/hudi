@@ -352,17 +352,21 @@ public abstract class BaseHoodieWriteClient<T, I, K, O> extends BaseHoodieClient
     if (table.isTableServiceAction(actionType, instantTime)) {
       tableServiceClient.writeTableMetadata(table, instantTime, actionType, metadata);
     } else {
-      if (config.getBasePath().contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail4_mt_pre_commit.txt", "Fail metadata table commit for " + instantTime + " " + actionType, 16);
-      } else {
-        killJVMIfDesired("/tmp/fail4_dt_pre_commit.txt", "Fail after metadata table commit/services before data table commit "
-            + instantTime + " " + actionType, 16);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (config.getBasePath().contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail4_mt_pre_commit.txt", "Fail metadata table commit for " + instantTime + " " + actionType, 16);
+        } else {
+          killJVMIfDesired("/tmp/fail4_dt_pre_commit.txt", "Fail after metadata table commit/services before data table commit "
+              + instantTime + " " + actionType, 16);
+        }
       }
       context.setJobStatus(this.getClass().getSimpleName(), "Committing to metadata table: " + config.getTableName());
       table.getMetadataWriter(instantTime).ifPresent(w -> ((HoodieTableMetadataWriter) w).update(metadata, instantTime, false));
-      if (!config.getBasePath().contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail4_dt_post_commit.txt",
-            "Fail after metadata table commit/services before data table commit " + instantTime + " " + actionType, 16);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (!config.getBasePath().contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail4_dt_post_commit.txt",
+              "Fail after metadata table commit/services before data table commit " + instantTime + " " + actionType, 16);
+        }
       }
     }
   }

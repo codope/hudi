@@ -245,16 +245,20 @@ public abstract class BaseRollbackActionExecutor<T, I, K, O> extends BaseActionE
       // If publish the rollback to the timeline, we first write the rollback metadata
       // to metadata table
       if (!skipTimelinePublish) {
-        if (config.getBasePath().contains(".hoodie/metadata")) {
-          killJVMIfDesired("/tmp/fail72_mt_rollback.txt", "Fail metadata rollback for " + instantToRollback.toString(), 8);
-        } else {
-          killJVMIfDesired("/tmp/fail72_dt_rollback.txt", "Fail data table rollback just before writing to MDT " + instantToRollback.toString(), 8);
+        if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+          if (config.getBasePath().contains(".hoodie/metadata")) {
+            killJVMIfDesired("/tmp/fail72_mt_rollback.txt", "Fail metadata rollback for " + instantToRollback.toString(), 8);
+          } else {
+            killJVMIfDesired("/tmp/fail72_dt_rollback.txt", "Fail data table rollback just before writing to MDT " + instantToRollback.toString(), 8);
+          }
         }
         writeTableMetadata(rollbackMetadata);
       }
-      if (!config.getBasePath().contains(".hoodie/metadata")) {
-        killJVMIfDesired("/tmp/fail72_dt_rollback.txt", "Fail data table rollback after writing to MDT, before completing in DT "
-            + instantToRollback.toString(), 8);
+      if (table.getMetaClient().getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        if (!config.getBasePath().contains(".hoodie/metadata")) {
+          killJVMIfDesired("/tmp/fail72_dt_rollback.txt", "Fail data table rollback after writing to MDT, before completing in DT "
+              + instantToRollback.toString(), 8);
+        }
       }
 
       // Then we delete the inflight instant in the data table timeline if enabled

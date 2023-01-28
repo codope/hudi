@@ -1049,7 +1049,9 @@ public abstract class HoodieBackedTableMetadataWriter implements HoodieTableMeta
     if (!metadataMetaClient.getActiveTimeline().filterCompletedInstants().containsInstant(compactionInstantTime)
         && writeClient.scheduleCompactionAtInstant(compactionInstantTime, Option.empty())) {
       writeClient.compact(compactionInstantTime);
-      killJVMIfDesired("/tmp/fail92_mt_write.txt", "Fail metadata table just after compaction " + compactionInstantTime, 4);
+      if (dataMetaClient.getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+        killJVMIfDesired("/tmp/fail92_mt_write.txt", "Fail metadata table just after compaction " + compactionInstantTime, 4);
+      }
     }
   }
 
@@ -1067,7 +1069,9 @@ public abstract class HoodieBackedTableMetadataWriter implements HoodieTableMeta
       // 3 is a value that I think is enough for metadata table reader.
       return;
     }
-    killJVMIfDesired("/tmp/fail102_mt_write.txt", "Fail metadata table just before cleaning " + instantTime, 12);
+    if (dataMetaClient.getActiveTimeline().getWriteTimeline().filterCompletedInstants().countInstants() > 1) {
+      killJVMIfDesired("/tmp/fail102_mt_write.txt", "Fail metadata table just before cleaning " + instantTime, 12);
+    }
     // Trigger cleaning with suffixes based on the same instant time. This ensures that any future
     // delta commits synced over will not have an instant time lesser than the last completed instant on the
     // metadata table.
