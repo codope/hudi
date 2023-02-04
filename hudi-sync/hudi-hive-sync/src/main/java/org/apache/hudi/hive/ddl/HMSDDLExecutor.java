@@ -236,21 +236,30 @@ public class HMSDDLExecutor implements DDLExecutor {
     LOG.info("Changing partitions " + changedPartitions.size() + " on " + tableName);
     try {
       StorageDescriptor sd = client.getTable(databaseName, tableName).getSd();
-      List<Partition> partitionList = changedPartitions.stream().map(partition -> {
-        Path partitionPath = FSUtils.getPartitionPath(syncConfig.getString(META_SYNC_BASE_PATH), partition);
-        String partitionScheme = partitionPath.toUri().getScheme();
-        String fullPartitionPath = StorageSchemes.HDFS.getScheme().equals(partitionScheme)
-            ? FSUtils.getDFSFullPartitionPath(syncConfig.getHadoopFileSystem(), partitionPath) : partitionPath.toString();
-        List<String> partitionValues = partitionValueExtractor.extractPartitionValuesInPath(partition);
-        StorageDescriptor partitionSd = sd.deepCopy();
-        partitionSd.setLocation(fullPartitionPath);
-        return new Partition(partitionValues, databaseName, tableName, 0, 0, partitionSd, null);
-      }).collect(Collectors.toList());
-      client.alter_partitions(databaseName, tableName, partitionList, null);
+      // List<Partition> partitionList = changedPartitions.stream().map(partition -> getPartition(tableName, sd, partition)).collect(Collectors.toList());
+      changedPartitions.parallelStream().forEach(partition -> {
+        try {
+          client.alter_partition(databaseName, tableName, getPartition(tableName, sd, partition), null);
+        } catch (TException e) {
+          LOG.warn(databaseName + "." + tableName + " update partition: " + partition + " failed", e);
+        }
+      });
+      // partitionList.parallelStream().forEach(partition -> client.alter_partition(databaseName, tableName, partition, null));
     } catch (TException e) {
       LOG.error(databaseName + "." + tableName + " update partition failed", e);
       throw new HoodieHiveSyncException(databaseName + "." + tableName + " update partition failed", e);
     }
+  }
+
+  private Partition getPartition(String tableName, StorageDescriptor sd, String partition) {
+    Path partitionPath = FSUtils.getPartitionPath(syncConfig.getString(META_SYNC_BASE_PATH), partition);
+    String partitionScheme = partitionPath.toUri().getScheme();
+    String fullPartitionPath = StorageSchemes.HDFS.getScheme().equals(partitionScheme)
+        ? FSUtils.getDFSFullPartitionPath(syncConfig.getHadoopFileSystem(), partitionPath) : partitionPath.toString();
+    List<String> partitionValues = partitionValueExtractor.extractPartitionValuesInPath(partition);
+    StorageDescriptor partitionSd = sd.deepCopy();
+    partitionSd.setLocation(fullPartitionPath);
+    return new Partition(partitionValues, databaseName, tableName, 0, 0, partitionSd, null);
   }
 
   @Override
