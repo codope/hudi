@@ -225,9 +225,13 @@ public abstract class BaseHoodieWriteClient<T, I, K, O> extends BaseHoodieClient
         extraMetadata, operationType, config.getWriteSchema(), commitActionType);
     HoodieInstant inflightInstant = new HoodieInstant(State.INFLIGHT, table.getMetaClient().getCommitActionType(), instantTime);
     HeartbeatUtils.abortIfHeartbeatExpired(instantTime, table, heartbeatClient, config);
+    LOG.warn("XXX Looking to acquire lock: " + instantTime);
     this.txnManager.beginTransaction(Option.of(inflightInstant),
         lastCompletedTxnAndMetadata.isPresent() ? Option.of(lastCompletedTxnAndMetadata.get().getLeft()) : Option.empty());
     try {
+      LOG.warn("Sleeping after acquiring the lock for 60 secs ");
+      Thread.sleep(60000);
+      LOG.warn("Resuming after acquiring");
       preCommit(inflightInstant, metadata);
       if (extraPreCommitFunc.isPresent()) {
         extraPreCommitFunc.get().accept(table.getMetaClient(), metadata);
@@ -238,6 +242,8 @@ public abstract class BaseHoodieWriteClient<T, I, K, O> extends BaseHoodieClient
       releaseResources(instantTime);
     } catch (IOException e) {
       throw new HoodieCommitException("Failed to complete commit " + config.getBasePath() + " at time " + instantTime, e);
+    } catch (InterruptedException e) {
+      LOG.error("XXX Interrupted: " + instantTime);
     } finally {
       this.txnManager.endTransaction(Option.of(inflightInstant));
     }

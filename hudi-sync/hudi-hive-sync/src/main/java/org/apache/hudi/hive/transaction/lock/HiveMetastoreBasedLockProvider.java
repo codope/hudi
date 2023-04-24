@@ -37,6 +37,8 @@ import org.apache.hadoop.hive.metastore.api.LockResponse;
 import org.apache.hadoop.hive.metastore.api.LockState;
 import org.apache.hadoop.hive.metastore.api.LockType;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.ShowLocksRequest;
+import org.apache.hadoop.hive.metastore.api.ShowLocksResponse;
 import org.apache.hadoop.hive.ql.metadata.Hive;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.thrift.TException;
@@ -110,11 +112,11 @@ public class HiveMetastoreBasedLockProvider implements LockProvider<LockResponse
 
   @Override
   public boolean tryLock(long time, TimeUnit unit) {
-    LOG.info(generateLogStatement(ACQUIRING, generateLogSuffixString()));
+    LOG.warn(generateLogStatement(ACQUIRING, generateLogSuffixString()));
     try {
       acquireLock(time, unit);
     } catch (ExecutionException | InterruptedException | TimeoutException | TException e) {
-      throw new HoodieLockException(generateLogStatement(FAILED_TO_ACQUIRE, generateLogSuffixString()), e);
+      throw new HoodieLockException(generateLogStatement(FAILED_TO_ACQUIRE, generateLogSuffixString()), e); // reaches here.
     }
     return this.lock != null && this.lock.getState() == LockState.ACQUIRED;
   }
@@ -122,14 +124,14 @@ public class HiveMetastoreBasedLockProvider implements LockProvider<LockResponse
   @Override
   public void unlock() {
     try {
-      LOG.info(generateLogStatement(RELEASING, generateLogSuffixString()));
+      LOG.warn(generateLogStatement(RELEASING, generateLogSuffixString() + "     " + this.lock.getLockid() + "  Lock state: " + this.lock.getState()));
       LockResponse lockResponseLocal = lock;
       if (lockResponseLocal == null) {
         return;
       }
       lock = null;
       hiveClient.unlock(lockResponseLocal.getLockid());
-      LOG.info(generateLogStatement(RELEASED, generateLogSuffixString()));
+      LOG.warn(generateLogStatement(RELEASED, generateLogSuffixString()));
     } catch (TException e) {
       throw new HoodieLockException(generateLogStatement(FAILED_TO_RELEASE, generateLogSuffixString()), e);
     }
@@ -185,11 +187,14 @@ public class HiveMetastoreBasedLockProvider implements LockProvider<LockResponse
       lockRequest = builder.addLockComponent(lockComponent).setUser(System.getProperty("user.name")).build();
       lockRequest.setUserIsSet(true);
       final LockRequest lockRequestFinal = lockRequest;
+      hiveClient.lock(lockRequest)
       this.lock = executor.submit(() -> hiveClient.lock(lockRequestFinal))
           .get(time, unit);
+      LOG.warn("While trying lock for: " + this.lock.getLockid() + "  Lock state: " + this.lock.getState());
     } catch (InterruptedException | TimeoutException e) {
       if (this.lock == null || this.lock.getState() != LockState.ACQUIRED) {
-        LockResponse lockResponse = this.hiveClient.checkLock(lockRequest.getTxnid());
+        // LOG.warn("XXX Checking lock: " + this.lock.getLockid() + "  Lock state: " + this.lock.getState());
+        LockResponse lockResponse = this.hiveClient.checkLock(lockRequest.getTxnid()); // fails here.
         if (lockResponse.getState() == LockState.ACQUIRED) {
           this.lock = lockResponse;
         } else {
@@ -198,8 +203,12 @@ public class HiveMetastoreBasedLockProvider implements LockProvider<LockResponse
       }
     } finally {
       // it is better to release WAITING lock, otherwise hive lock will hang forever
+      LOG.warn("XXX In finally block" + this.lock.getLockid() + "  Lock state: " + this.lock.getState());
       if (this.lock != null && this.lock.getState() != LockState.ACQUIRED) {
+        LOG.warn("XXX Unlocking " + this.lock.getLockid() + "  Lock state: " + this.lock.getState());
         hiveClient.unlock(this.lock.getLockid());
+        ShowLocksResponse showLocksResponse = hiveClient.showLocks();
+        showLocksResponse.getLocks().forEach(lock -> lock.heart);
         lock = null;
       }
     }

@@ -81,7 +81,7 @@ public class LockManager implements Serializable, AutoCloseable {
             break;
           }
           metrics.updateLockNotAcquiredMetric();
-          LOG.info("Retrying to acquire lock. Current lock owner information : " + lockProvider.getCurrentOwnerLockInfo());
+          LOG.warn("Retrying to acquire lock. Current lock owner information : " + lockProvider.getCurrentOwnerLockInfo());
           Thread.sleep(maxWaitTimeInMs);
         } catch (HoodieLockException | InterruptedException e) {
           metrics.updateLockNotAcquiredMetric();
@@ -118,7 +118,7 @@ public class LockManager implements Serializable, AutoCloseable {
   public synchronized LockProvider getLockProvider() {
     // Perform lazy initialization of lock provider only if needed
     if (lockProvider == null) {
-      LOG.info("LockProvider " + writeConfig.getLockProviderClass());
+      LOG.warn("LockProvider " + writeConfig.getLockProviderClass());
       lockProvider = (LockProvider) ReflectionUtils.loadClass(writeConfig.getLockProviderClass(),
           lockConfiguration, hadoopConf.get());
     }
@@ -134,7 +134,7 @@ public class LockManager implements Serializable, AutoCloseable {
     try {
       if (lockProvider != null) {
         lockProvider.close();
-        LOG.info("Released connection created for acquiring lock");
+        LOG.warn("Released connection created for acquiring lock");
         lockProvider = null;
       }
     } catch (Exception e) {
