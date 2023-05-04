@@ -1,0 +1,2 @@
+{"_id": "{\"$oid\": \"6452ae70e86f726f9ed2d1cb\"}", "created_at": 1683140208533, "updated_at": 1683153083687, "onboarding_details": [{"completed_at": 1683141515000, "version": "v0"}]}
+{"_id": "{\"$oid\": \"625bc9abf00573f45f30670d\"}", "created_at": 1593421706000, "updated_at": 1683153083687, "onboarding_details": [{"completed_at": 1683141515000, "version": "v1"}]}

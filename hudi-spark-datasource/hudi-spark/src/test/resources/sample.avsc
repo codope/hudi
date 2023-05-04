@@ -1,0 +1,67 @@
+{
+  "type": "record",
+  "name": "hudi_profiles",
+  "namespace": "hudi_analytics",
+  "fields": [
+    {
+      "name": "_id",
+      "type": "string"
+    },
+    {
+      "name": "created_at",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ]
+    },
+    {
+      "name": "updated_at",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ]
+    },
+    {
+      "name": "onboarding_details",
+      "type": [
+        "null",
+        {
+          "type": "array",
+          "items": [
+            "null",
+            {
+              "type": "record",
+              "name": "onboarding_details",
+              "fields": [
+                {
+                  "name": "version",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                {
+                  "name": "completed_at",
+                  "type": [
+                    "null",
+                    {
+                      "type": "long",
+                      "logicalType": "timestamp-millis"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "default": null
+    }
+  ]
+}

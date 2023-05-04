@@ -18,17 +18,21 @@
  */
 package org.apache.hudi
 
+import org.apache.avro.Schema
+import org.apache.hudi.DataSourceWriteOptions.{PRECOMBINE_FIELD_OPT_KEY, RECORDKEY_FIELD_OPT_KEY, TABLE_NAME}
 import org.apache.hudi.common.config.HoodieMetadataConfig
 import org.apache.hudi.common.model.HoodieTableType
+import org.apache.hudi.common.table.HoodieTableConfig
 import org.apache.hudi.config.HoodieWriteConfig
 import org.apache.hudi.exception.SchemaCompatibilityException
 import org.apache.hudi.testutils.HoodieClientTestBase
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
-import org.junit.jupiter.api.{AfterEach, BeforeEach}
+import org.apache.spark.sql.{DataFrame, Row, SaveMode, SparkSession}
+import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.{CsvSource, ValueSource}
 
+import java.nio.file.{Files, Paths}
 import scala.language.postfixOps
 
 /**
@@ -807,5 +811,38 @@ class TestAvroSchemaResolutionSupport extends HoodieClientTestBase with ScalaAss
     readDf.printSchema()
     readDf.show(false)
     readDf.foreach(_ => {})
+  }
+
+  @Test
+  def testTimestampFields(): Unit = {
+    val schemaFile = "src/test/resources/sample.avsc"
+    val dataFile = "src/test/resources/sample.jsonl"
+
+    val jsonFormatSchema = new String(Files.readAllBytes(Paths.get(schemaFile)))
+    println("json schema: " + jsonFormatSchema)
+
+    val schemaStruct = AvroConversionUtils.convertAvroSchemaToStructType(new Schema.Parser().parse(jsonFormatSchema))
+    println("converted schema: " + schemaStruct)
+
+    val tableName = "hudi_apna_profile"
+    val basePath = "file:///tmp/hudi_apna_profile2"
+
+    val df = spark.read.format("json").schema(schemaStruct).load(dataFile)
+    df.printSchema()
+
+    df.write.format("hudi").
+      option(PRECOMBINE_FIELD_OPT_KEY, "updated_at").
+      option(RECORDKEY_FIELD_OPT_KEY, "_id").
+      option(HoodieTableConfig.HOODIE_TABLE_NAME_KEY, tableName).
+      option(HoodieMetadataConfig.ENABLE.key, "false").
+      mode(SaveMode.Overwrite).
+      save(basePath)
+
+    val tripsSnapshotDF = spark.
+      read.
+      format("hudi").
+      load(basePath)
+    tripsSnapshotDF.createOrReplaceTempView("hudi_trips_snapshot")
+    spark.sql("select * from hudi_trips_snapshot").show(false)
   }
 }
