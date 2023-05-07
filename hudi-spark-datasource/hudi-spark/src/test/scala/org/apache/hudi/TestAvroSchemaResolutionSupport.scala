@@ -19,11 +19,11 @@
 package org.apache.hudi
 
 import org.apache.avro.Schema
-import org.apache.hudi.DataSourceWriteOptions.{PRECOMBINE_FIELD_OPT_KEY, RECORDKEY_FIELD_OPT_KEY, TABLE_NAME}
+import org.apache.hudi.DataSourceWriteOptions.{PRECOMBINE_FIELD_OPT_KEY, RECORDKEY_FIELD_OPT_KEY, TABLE_NAME, TABLE_TYPE_OPT_KEY}
 import org.apache.hudi.common.config.HoodieMetadataConfig
 import org.apache.hudi.common.model.HoodieTableType
 import org.apache.hudi.common.table.HoodieTableConfig
-import org.apache.hudi.config.HoodieWriteConfig
+import org.apache.hudi.config.{HoodieCompactionConfig, HoodieWriteConfig}
 import org.apache.hudi.exception.SchemaCompatibilityException
 import org.apache.hudi.testutils.HoodieClientTestBase
 import org.apache.spark.sql.types._
@@ -825,7 +825,7 @@ class TestAvroSchemaResolutionSupport extends HoodieClientTestBase with ScalaAss
     println("converted schema: " + schemaStruct)
 
     val tableName = "hudi_apna_profile"
-    val basePath = "file:///tmp/hudi_apna_profile2"
+    val basePath = "file:///tmp/hudi_apna_profile4"
 
     val df = spark.read.format("json").schema(schemaStruct).load(dataFile)
     df.printSchema()
@@ -833,6 +833,7 @@ class TestAvroSchemaResolutionSupport extends HoodieClientTestBase with ScalaAss
     df.write.format("hudi").
       option(PRECOMBINE_FIELD_OPT_KEY, "updated_at").
       option(RECORDKEY_FIELD_OPT_KEY, "_id").
+      option(TABLE_TYPE_OPT_KEY, "MERGE_ON_READ").
       option(HoodieTableConfig.HOODIE_TABLE_NAME_KEY, tableName).
       option(HoodieMetadataConfig.ENABLE.key, "false").
       mode(SaveMode.Overwrite).
@@ -844,5 +845,25 @@ class TestAvroSchemaResolutionSupport extends HoodieClientTestBase with ScalaAss
       load(basePath)
     tripsSnapshotDF.createOrReplaceTempView("hudi_trips_snapshot")
     spark.sql("select * from hudi_trips_snapshot").show(false)
+
+    /*val dataFile2 = "src/test/resources/sample2.jsonl"
+    val df2 = spark.read.format("json").schema(schemaStruct).load(dataFile2)
+    df2.write.format("hudi").
+      option(PRECOMBINE_FIELD_OPT_KEY, "updated_at").
+      option(RECORDKEY_FIELD_OPT_KEY, "_id").
+      option(TABLE_TYPE_OPT_KEY, "MERGE_ON_READ").
+      option(HoodieTableConfig.HOODIE_TABLE_NAME_KEY, tableName).
+      option(HoodieMetadataConfig.ENABLE.key, "false").
+      option(HoodieCompactionConfig.INLINE_COMPACT.key, "true").
+      option(HoodieCompactionConfig.INLINE_COMPACT_NUM_DELTA_COMMITS.key, "1").
+      mode(SaveMode.Append).
+      save(basePath)
+
+    val tripsSnapshotDF2 = spark.
+      read.
+      format("hudi").
+      load(basePath)
+    tripsSnapshotDF2.createOrReplaceTempView("hudi_trips_snapshot")
+    spark.sql("select * from hudi_trips_snapshot").show(false)*/
   }
 }

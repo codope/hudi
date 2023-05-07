@@ -17,10 +17,13 @@
 
 package org.apache.spark.sql.avro
 
+import org.apache.avro.Schema
 import org.apache.hudi.avro.model.HoodieMetadataColumnStats
 import org.apache.spark.sql.avro.SchemaConverters.SchemaType
 import org.junit.Test
 import org.junit.jupiter.api.Assertions.assertEquals
+
+import java.nio.file.{Files, Paths}
 
 class TestSchemaConverters {
 
@@ -28,6 +31,19 @@ class TestSchemaConverters {
   def testAvroUnionConversion(): Unit = {
     val originalAvroSchema = HoodieMetadataColumnStats.SCHEMA$
 
+    testSchemaConversion(originalAvroSchema)
+  }
+
+  @Test
+  def testAvroTimestampConversion(): Unit = {
+    val schemaFile = "src/test/resources/sample.avsc"
+    val jsonFormatSchema = new String(Files.readAllBytes(Paths.get(schemaFile)))
+    val originalAvroSchema = new Schema.Parser().parse(jsonFormatSchema)
+
+    testSchemaConversion(originalAvroSchema)
+  }
+
+  private def testSchemaConversion(originalAvroSchema: Schema) = {
     val SchemaType(convertedStructType, _) = SchemaConverters.toSqlType(originalAvroSchema)
     val convertedAvroSchema = SchemaConverters.toAvroType(convertedStructType)
 
@@ -36,5 +52,4 @@ class TestSchemaConverters {
     //       derived Catalyst schemas instead
     assertEquals(convertedStructType, SchemaConverters.toSqlType(convertedAvroSchema).dataType)
   }
-
 }

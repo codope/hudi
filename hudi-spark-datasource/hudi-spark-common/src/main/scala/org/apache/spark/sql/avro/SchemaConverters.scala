@@ -164,7 +164,7 @@ private[sql] object SchemaConverters {
       case DateType =>
         LogicalTypes.date().addToSchema(builder.intType())
       case TimestampType =>
-        LogicalTypes.timestampMillis().addToSchema(builder.longType())
+        LogicalTypes.timestampMicros().addToSchema(builder.longType())
 
       case FloatType => builder.floatType()
       case DoubleType => builder.doubleType()
