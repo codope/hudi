@@ -28,7 +28,7 @@ import java.io.Serializable;
 /**
  * A wrapped configuration which can be serialized.
  */
-public class SerializableConfiguration implements Serializable {
+public class SerializableConfiguration implements Serializable, HoodieConfiguration<Object> {
 
   private static final long serialVersionUID = 1L;
 
@@ -65,5 +65,10 @@ public class SerializableConfiguration implements Serializable {
     StringBuilder str = new StringBuilder();
     configuration.iterator().forEachRemaining(e -> str.append(String.format("%s => %s \n", e.getKey(), e.getValue())));
     return configuration.toString();
+  }
+
+  @Override
+  public void setConf(Object o) {
+    this.configuration = (Configuration) o;
   }
 }
