@@ -100,6 +100,7 @@ import org.apache.hudi.table.HoodieTable;
 import org.apache.hudi.table.action.HoodieWriteMetadata;
 import org.apache.hudi.table.upgrade.SparkUpgradeDowngradeHelper;
 import org.apache.hudi.table.upgrade.UpgradeDowngrade;
+import org.apache.hudi.testutils.HoodieSparkWriteableTestTable;
 import org.apache.hudi.testutils.MetadataMergeWriteStatus;
 
 import org.apache.avro.Schema;
@@ -547,6 +548,7 @@ public class TestHoodieBackedMetadata extends TestHoodieMetadataBase {
     // HoodieTableType tableType
     HoodieTableType tableType = COPY_ON_WRITE;
     init(tableType);
+    testTable = HoodieSparkWriteableTestTable.of(metaClient, null, null, metadataWriter, context);
     doWriteOperation(testTable, "0000001", INSERT);
     doWriteOperation(testTable, "0000002");
     doCleanAndValidate(testTable, "0000003", Arrays.asList("0000001"));

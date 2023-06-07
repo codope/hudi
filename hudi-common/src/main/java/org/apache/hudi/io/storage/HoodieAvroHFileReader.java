@@ -548,7 +548,7 @@ public class HoodieAvroHFileReader extends HoodieAvroFileReaderBase implements H
   @Override
   public ClosableIterator<String> getRecordKeyIterator() {
     // Why pread=false? Wouldn't it be better to set it to true for random reads?
-    final HFileScanner scanner = reader.getScanner(false, false);
+    final HFileScanner scanner = reader.getScanner(true, true);
     return new ClosableIterator<String>() {
       @Override
       public boolean hasNext() {

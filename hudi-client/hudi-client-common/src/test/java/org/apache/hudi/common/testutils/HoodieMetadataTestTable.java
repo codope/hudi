@@ -22,6 +22,8 @@ import org.apache.hudi.avro.model.HoodieCleanMetadata;
 import org.apache.hudi.avro.model.HoodieRequestedReplaceMetadata;
 import org.apache.hudi.avro.model.HoodieRestoreMetadata;
 import org.apache.hudi.avro.model.HoodieRollbackMetadata;
+import org.apache.hudi.client.WriteStatus;
+import org.apache.hudi.common.data.HoodieData;
 import org.apache.hudi.common.data.HoodieListData;
 import org.apache.hudi.common.model.HoodieCommitMetadata;
 import org.apache.hudi.common.model.HoodieReplaceCommitMetadata;
@@ -80,9 +82,13 @@ public class HoodieMetadataTestTable extends HoodieTestTable {
         partitionToFilesNameLengthMap, bootstrap, createInflightCommit);
     if (writer != null && !createInflightCommit) {
       writer.performTableServices(Option.of(commitTime));
-      writer.update(commitMetadata, HoodieListData.eager(Collections.EMPTY_LIST), commitTime);
+      writer.update(commitMetadata, getWriteStatuses(), commitTime);
     }
     return commitMetadata;
+  }
+
+  public HoodieData<WriteStatus> getWriteStatuses() {
+    return HoodieListData.eager(Collections.EMPTY_LIST);
   }
 
   @Override
