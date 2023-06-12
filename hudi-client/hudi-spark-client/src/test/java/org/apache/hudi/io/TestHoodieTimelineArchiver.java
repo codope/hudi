@@ -135,7 +135,7 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
     hadoopConf.addResource(wrapperFs.getConf());
   }
 
-  private void initWriteConfigAndMetatableWriter(HoodieWriteConfig writeConfig, boolean enableMetadataTable) {
+  private void initWriteConfigAndMetatableWriter(HoodieWriteConfig writeConfig, boolean enableMetadataTable) throws IOException {
     if (enableMetadataTable) {
       metadataWriter = SparkHoodieBackedTableMetadataWriter.create(hadoopConf, writeConfig, context);
       testTable = HoodieMetadataTestTable.of(metaClient, metadataWriter);
@@ -333,7 +333,7 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
             .withCleanerPolicy(HoodieCleaningPolicy.KEEP_LATEST_BY_HOURS).cleanerNumHoursRetained(1)
             .retainCommits(2)
             .build())
-        .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(3,4).build())
+        .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(3, 4).build())
         .build();
 
     HoodieTestTable testTable = HoodieTestTable.of(metaClient);
@@ -342,11 +342,11 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
     Instant instant = Instant.now();
     ZonedDateTime commitDateTime = ZonedDateTime.ofInstant(instant, ZoneId.systemDefault());
 
-    triggerCommit(p0, p1, commitDateTime, 5, testTable);
-    triggerCommit(p0, p1, commitDateTime, 10, testTable);
-    triggerCommit(p0, p1, commitDateTime, 20, testTable);
-    triggerCommit(p0, p1, commitDateTime, 30, testTable);
-    triggerCommit(p0, p1, commitDateTime, 40, testTable);
+    triggerCommit(p0, p1, commitDateTime, 5, testTable, config);
+    triggerCommit(p0, p1, commitDateTime, 10, testTable, config);
+    triggerCommit(p0, p1, commitDateTime, 20, testTable, config);
+    triggerCommit(p0, p1, commitDateTime, 30, testTable, config);
+    triggerCommit(p0, p1, commitDateTime, 40, testTable, config);
 
     metaClient = HoodieTableMetaClient.reload(metaClient);
     // lets trigger archival. should fail since archival configs does not align w/ cleaner configs.
@@ -358,25 +358,53 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
     }
   }
 
-  private void triggerCommit(String p0, String p1, ZonedDateTime curDateTime, int minutesForCommit, HoodieTestTable testTable) throws Exception {
+  private void triggerCommit(String p0, String p1, ZonedDateTime curDateTime, int minutesForCommit, HoodieTestTable testTable, HoodieWriteConfig config) throws Exception {
 
     String file1P0C0 = UUID.randomUUID().toString();
     String file1P1C0 = UUID.randomUUID().toString();
     String commitTs = HoodieActiveTimeline.formatDate(Date.from(curDateTime.minusMinutes(minutesForCommit).toInstant()));
-    testTable.addInflightCommit(commitTs).withBaseFilesInPartition(p0, file1P0C0).withBaseFilesInPartition(p1, file1P1C0);
+    HoodieTableMetadataWriter metadataWriter = SparkHoodieBackedTableMetadataWriter.create(hadoopConf, config, context);
+    Map<String, List<String>> part1ToFileId = Collections.unmodifiableMap(new HashMap<String, List<String>>() {
+      {
+        put(p0, CollectionUtils.createImmutableList(file1P0C0));
+        put(p1, CollectionUtils.createImmutableList(file1P1C0));
+      }
+    });
+    commitWithMdt(commitTs, part1ToFileId, testTable, metadataWriter, true, true);
+    metaClient = HoodieTableMetaClient.reload(metaClient);
+  }
 
-    HoodieCommitMetadata commitMetadata = generateCommitMetadata(commitTs,
-        Collections.unmodifiableMap(new HashMap<String, List<String>>() {
-          {
-            put(p0, CollectionUtils.createImmutableList(file1P0C0));
-            put(p1, CollectionUtils.createImmutableList(file1P1C0));
-          }
-        })
-    );
+  private void commitWithMdt(String instantTime, Map<String, List<String>> partToFileId,
+                             HoodieTestTable testTable, HoodieTableMetadataWriter metadataWriter, boolean addBaseFiles, boolean addLogFiles) throws Exception {
+    testTable.addInflightCommit(instantTime);
+    Map<String, List<String>> partToFileIds = new HashMap<>();
+    partToFileId.forEach((key, value) -> {
+      try {
+        List<String> files = new ArrayList<>();
+        if (addBaseFiles) {
+          files.addAll(testTable.withBaseFilesInPartition(key, value.toArray(new String[0])).getValue());
+        }
+        if (addLogFiles) {
+          value.forEach(logFilePrefix -> {
+            try {
+              files.addAll(testTable.withLogFile(key, logFilePrefix, 1, 2).getValue());
+            } catch (Exception e) {
+              e.printStackTrace();
+            }
+          });
+        }
+        partToFileIds.put(key, files);
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
+    });
+    HoodieCommitMetadata commitMeta = generateCommitMetadata(instantTime, partToFileIds);
+    metadataWriter.performTableServices(Option.of(instantTime));
+    metadataWriter.update(commitMeta, context.emptyHoodieData(), instantTime);
     metaClient.getActiveTimeline().saveAsComplete(
-        new HoodieInstant(HoodieInstant.State.INFLIGHT, HoodieTimeline.COMMIT_ACTION, commitTs),
-        Option.of(commitMetadata.toJsonString().getBytes(StandardCharsets.UTF_8)));
-
+        new HoodieInstant(State.INFLIGHT, HoodieTimeline.COMMIT_ACTION, instantTime),
+        Option.of(commitMeta.toJsonString().getBytes(StandardCharsets.UTF_8)));
+    metaClient = HoodieTableMetaClient.reload(metaClient);
   }
 
   protected static HoodieCommitMetadata generateCommitMetadata(
@@ -444,7 +472,7 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
     commitsAfterArchival = commitsList.getValue();
 
     metaClient.reloadActiveTimeline();
-    verifyArchival(getAllArchivedCommitInstants(Arrays.asList("00000001", "00000002","00000003", "00000004", "00000005", "00000006", "00000007")),
+    verifyArchival(getAllArchivedCommitInstants(Arrays.asList("00000001", "00000002", "00000003", "00000004", "00000005", "00000006", "00000007")),
         getActiveCommitInstants(Arrays.asList("00000008", "00000009")), commitsAfterArchival);
   }
 
@@ -1135,9 +1163,9 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
     HoodieWriteConfig cfg =
         HoodieWriteConfig.newBuilder().withPath(basePath).withSchema(HoodieTestDataGenerator.TRIP_EXAMPLE_SCHEMA)
             .withParallelism(2, 2).forTable("test-trip-table")
-          .withCleanConfig(HoodieCleanConfig.newBuilder().retainCommits(1).build())
-              .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(minInstantsToKeep, maxInstantsToKeep).build())
-              .withFileSystemViewConfig(FileSystemViewStorageConfig.newBuilder().withRemoteServerPort(timelineServicePort).build())
+            .withCleanConfig(HoodieCleanConfig.newBuilder().retainCommits(1).build())
+            .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(minInstantsToKeep, maxInstantsToKeep).build())
+            .withFileSystemViewConfig(FileSystemViewStorageConfig.newBuilder().withRemoteServerPort(timelineServicePort).build())
             .withMetadataConfig(HoodieMetadataConfig.newBuilder().enable(enableMetadataTable).build())
             .build();
     metaClient = HoodieTableMetaClient.reload(metaClient);
@@ -1195,7 +1223,7 @@ public class TestHoodieTimelineArchiver extends HoodieClientTestHarness {
         HoodieWriteConfig.newBuilder().withPath(basePath).withSchema(HoodieTestDataGenerator.TRIP_EXAMPLE_SCHEMA)
             .withParallelism(2, 2).forTable("test-trip-table")
             .withCleanConfig(HoodieCleanConfig.newBuilder().retainCommits(1).build())
-                .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(2, 3).build())
+            .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(2, 3).build())
             .withFileSystemViewConfig(FileSystemViewStorageConfig.newBuilder()
                 .withRemoteServerPort(timelineServicePort).build())
             .withMetadataConfig(HoodieMetadataConfig.newBuilder().enable(enableMetadataTable).build())

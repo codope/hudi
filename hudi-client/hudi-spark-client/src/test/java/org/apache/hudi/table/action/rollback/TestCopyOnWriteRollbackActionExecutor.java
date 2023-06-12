@@ -90,12 +90,12 @@ public class TestCopyOnWriteRollbackActionExecutor extends HoodieClientRollbackT
     HoodieTestTable testTable = HoodieTestTable.of(metaClient)
         .withPartitionMetaFiles(p1, p2, p3)
         .addCommit("001")
-        .withBaseFilesInPartition(p1, "id11")
-        .withBaseFilesInPartition(p2, "id12")
-        .withLogFile(p1, "id11", 3)
+        .withBaseFilesInPartition(p1, "id11").getLeft()
+        .withBaseFilesInPartition(p2, "id12").getLeft()
+        .withLogFile(p1, "id11", 3).getLeft()
         .addCommit("002")
-        .withBaseFilesInPartition(p1, "id21")
-        .withBaseFilesInPartition(p2, "id22");
+        .withBaseFilesInPartition(p1, "id21").getLeft()
+        .withBaseFilesInPartition(p2, "id22").getLeft();
 
     HoodieWriteConfig writeConfig = getConfigBuilder().withRollbackUsingMarkers(false).build();
     HoodieTable table = this.getHoodieTable(metaClient, writeConfig);
@@ -246,12 +246,12 @@ public class TestCopyOnWriteRollbackActionExecutor extends HoodieClientRollbackT
     HoodieTestTable testTable = HoodieTestTable.of(metaClient)
         .withPartitionMetaFiles(p1, p2, p3)
         .addCommit("001")
-        .withBaseFilesInPartition(p1, "id11")
-        .withBaseFilesInPartition(p2, "id12")
-        .withLogFile(p1, "id11", 3)
+        .withBaseFilesInPartition(p1, "id11").getLeft()
+        .withBaseFilesInPartition(p2, "id12").getLeft()
+        .withLogFile(p1, "id11", 3).getLeft()
         .addCommit("002")
-        .withBaseFilesInPartition(p1, "id21")
-        .withBaseFilesInPartition(p2, "id22")
+        .withBaseFilesInPartition(p1, "id21").getLeft()
+        .withBaseFilesInPartition(p2, "id22").getLeft()
         .addCommit("003")
         .withBaseFilesInPartition(p3, fileLengths);
 
@@ -339,12 +339,12 @@ public class TestCopyOnWriteRollbackActionExecutor extends HoodieClientRollbackT
     HoodieTestTable testTable = HoodieTestTable.of(metaClient)
         .withPartitionMetaFiles(p1, p2, p3)
         .addCommit("001")
-        .withBaseFilesInPartition(p1, "id11")
-        .withBaseFilesInPartition(p2, "id12")
-        .withLogFile(p1, "id11", 3)
+        .withBaseFilesInPartition(p1, "id11").getLeft()
+        .withBaseFilesInPartition(p2, "id12").getLeft()
+        .withLogFile(p1, "id11", 3).getLeft()
         .addCommit("002")
-        .withBaseFilesInPartition(p1, "id21")
-        .withBaseFilesInPartition(p2, "id22");
+        .withBaseFilesInPartition(p1, "id21").getLeft()
+        .withBaseFilesInPartition(p2, "id22").getLeft();
 
     HoodieTable table = this.getHoodieTable(metaClient, getConfigBuilder().withRollbackBackupEnabled(true).build());
     HoodieInstant needRollBackInstant = new HoodieInstant(false, HoodieTimeline.COMMIT_ACTION, "002");
