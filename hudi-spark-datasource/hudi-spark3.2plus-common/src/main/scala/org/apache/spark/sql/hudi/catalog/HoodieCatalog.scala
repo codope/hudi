@@ -20,6 +20,7 @@ package org.apache.spark.sql.hudi.catalog
 
 import org.apache.hadoop.fs.Path
 import org.apache.hudi.exception.HoodieException
+import org.apache.hudi.hive.HiveSyncConfigHolder
 import org.apache.hudi.sql.InsertMode
 import org.apache.hudi.sync.common.util.ConfigUtils
 import org.apache.hudi.{DataSourceReadOptions, DataSourceWriteOptions, SparkAdapterSupport}
@@ -174,14 +175,14 @@ class HoodieCatalog extends DelegatingCatalogExtension
   override def renameTable(oldIdent: Identifier, newIdent: Identifier): Unit = {
     loadTable(oldIdent) match {
       case HoodieV1OrV2Table(_) =>
-        AlterHoodieTableRenameCommand(oldIdent.asTableIdentifier, newIdent.asTableIdentifier, false).run(spark)
+        AlterHoodieTableRenameCommand(oldIdent.asTableIdentifier, newIdent.asTableIdentifier, isView = false).run(spark)
       case _ => super.renameTable(oldIdent, newIdent)
     }
   }
 
   override def alterTable(ident: Identifier, changes: TableChange*): Table = {
     loadTable(ident) match {
-      case HoodieV1OrV2Table(table) => {
+      case HoodieV1OrV2Table(table) =>
         val tableIdent = TableIdentifier(ident.name(), ident.namespace().lastOption)
         changes.groupBy(c => c.getClass).foreach {
           case (t, newColumns) if t == classOf[AddColumn] =>
@@ -217,13 +218,12 @@ class HoodieCatalog extends DelegatingCatalogExtension
         }
 
         loadTable(ident)
-      }
       case _ => super.alterTable(ident, changes: _*)
     }
   }
 
-  private def deduceTableLocationURIAndTableType(
-      ident: Identifier, properties: util.Map[String, String]): (URI, CatalogTableType) = {
+  private def deduceTableLocationURIAndTableType(ident: Identifier,
+                                                 properties: util.Map[String, String]): (URI, CatalogTableType) = {
     val locOpt = if (isPathIdentifier(ident)) {
       Option(ident.name())
     } else {
@@ -287,13 +287,13 @@ class HoodieCatalog extends DelegatingCatalogExtension
 
       val tblProperties = hoodieCatalogTable.catalogProperties
       val options = Map(
-        DataSourceWriteOptions.HIVE_CREATE_MANAGED_TABLE.key -> (tableDesc.tableType == CatalogTableType.MANAGED).toString,
-        DataSourceWriteOptions.HIVE_TABLE_SERDE_PROPERTIES.key -> ConfigUtils.configToString(tblProperties.asJava),
-        DataSourceWriteOptions.HIVE_TABLE_PROPERTIES.key -> ConfigUtils.configToString(tableDesc.properties.asJava),
+        HiveSyncConfigHolder.HIVE_CREATE_MANAGED_TABLE.key -> (tableDesc.tableType == CatalogTableType.MANAGED).toString,
+        HiveSyncConfigHolder.HIVE_TABLE_SERDE_PROPERTIES.key -> ConfigUtils.configToString(tblProperties.asJava),
+        HiveSyncConfigHolder.HIVE_TABLE_PROPERTIES.key -> ConfigUtils.configToString(tableDesc.properties.asJava),
         DataSourceWriteOptions.SQL_INSERT_MODE.key -> InsertMode.NON_STRICT.value(),
         DataSourceWriteOptions.SQL_ENABLE_BULK_INSERT.key -> "true"
       )
-      saveSourceDF(sourceQuery, tableDesc.properties ++ buildHoodieInsertConfig(hoodieCatalogTable, spark, isOverwritePartition =false, isOverwriteTable = false, Map.empty, options))
+      saveSourceDF(sourceQuery, tableDesc.properties ++ buildHoodieInsertConfig(hoodieCatalogTable, spark, isOverwritePartition = false, isOverwriteTable = false, Map.empty, options))
       CreateHoodieTableCommand.createTableInCatalog(spark, hoodieCatalogTable, ignoreIfExists = false)
     } else if (sourceQuery.isEmpty) {
       saveSourceDF(sourceQuery, tableDesc.properties)

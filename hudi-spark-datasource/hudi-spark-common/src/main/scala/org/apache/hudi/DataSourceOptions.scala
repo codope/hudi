@@ -434,15 +434,30 @@ object DataSourceWriteOptions {
     .key("hoodie.sql.bulk.insert.enable")
     .defaultValue("false")
     .markAdvanced()
-    .withDocumentation("When set to true, the sql insert statement will use bulk insert.")
+    .deprecatedAfter("0.14.0")
+    .withDocumentation("When set to true, the sql insert statement will use bulk insert. " +
+      "Deprecated since v0.14.0, use `hoodie.sql.write.operation` instead.")
 
   val SQL_INSERT_MODE: ConfigProperty[String] = ConfigProperty
     .key("hoodie.sql.insert.mode")
     .defaultValue("upsert")
+    .deprecatedAfter("0.14.0")
     .withDocumentation("Insert mode when insert data to pk-table. The optional modes are: upsert, strict and non-strict." +
       "For upsert mode, insert statement do the upsert operation for the pk-table which will update the duplicate record." +
       "For strict mode, insert statement will keep the primary key uniqueness constraint which do not allow duplicate record." +
-      "While for non-strict mode, hudi just do the insert operation for the pk-table.")
+      "While for non-strict mode, hudi just do the insert operation for the pk-table. " +
+      "Deprecated since v0.14.0, use `hoodie.sql.write.operation` instead.")
+
+  val SQL_WRITE_OPERATION: ConfigProperty[String] = ConfigProperty
+    .key("hoodie.sql.write.operation")
+    .defaultValue("insert")
+    .withValidValues("insert", "upsert", "bulk_insert") // TODO: check if we can add other operation types
+    .sinceVersion("0.14.0")
+    .withDocumentation("Insert mode when insert data to pk-table. The optional modes are: upsert, strict and non-strict." +
+      "For upsert mode, insert statement do the upsert operation for the pk-table which will update the duplicate record." +
+      "For strict mode, insert statement will keep the primary key uniqueness constraint which do not allow duplicate record." +
+      "While for non-strict mode, hudi just do the insert operation for the pk-table. " +
+      "Deprecated since v0.14.0, use `hoodie.sql.write.operation` instead.")
 
   val COMMIT_METADATA_KEYPREFIX: ConfigProperty[String] = ConfigProperty
     .key("hoodie.datasource.write.commitmeta.key.prefix")
