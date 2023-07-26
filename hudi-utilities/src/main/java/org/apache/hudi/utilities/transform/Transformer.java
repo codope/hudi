@@ -53,4 +53,35 @@ public interface Transformer {
     Dataset<Row> transformedDataset = this.apply(jsc, sparkSession, emptyDataset, properties);
     return transformedDataset.schema();
   }
+
+  @PublicAPIMethod(maturity = ApiMaturityLevel.EVOLVING)
+  default boolean validateImplementation(JavaSparkContext jsc, SparkSession sparkSession, Dataset<Row> rowDataset, TypedProperties properties) {
+    try {
+      Dataset<Row> transformedDataset = this.apply(jsc, sparkSession, rowDataset, properties);
+      // Perform additional checks here to validate the transformedDataset
+      // You can also validate against a predefined schema or values
+      // Return true if validation passes, for example count validation
+      return transformedDataset.count() == rowDataset.count();
+    } catch (Exception e) {
+      // Return false if validation fails
+      return false;
+    }
+  }
+
+  @PublicAPIMethod(maturity = ApiMaturityLevel.EVOLVING)
+  default Dataset<Row> applyWithRetry(JavaSparkContext jsc, SparkSession sparkSession, Dataset<Row> rowDataset, TypedProperties properties, int maxRetries) {
+    for (int attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return this.apply(jsc, sparkSession, rowDataset, properties);
+      } catch (Exception e) {
+        // You may want to log the exception here
+        if (attempt == maxRetries - 1) { // if last attempt
+          throw e; // rethrow last exception
+        }
+        // Implement back-off strategy (like Thread.sleep()) or continue based on the exception
+      }
+    }
+    // Should never reach here
+    return null;
+  }
 }
