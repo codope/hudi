@@ -78,6 +78,7 @@ public abstract class BaseHoodieTableFileIndex implements AutoCloseable {
   private static final Logger LOG = LoggerFactory.getLogger(BaseHoodieTableFileIndex.class);
 
   private final String[] partitionColumns;
+  private final Map<String, String> partitionColumnsWithTypes;
 
   protected final HoodieMetadataConfig metadataConfig;
 
@@ -135,6 +136,7 @@ public abstract class BaseHoodieTableFileIndex implements AutoCloseable {
                                   boolean shouldListLazily) {
     this.partitionColumns = metaClient.getTableConfig().getPartitionFields()
         .orElse(new String[0]);
+    this.partitionColumnsWithTypes = metaClient.getTableConfig().getPartitionFieldsWithTypes();
 
     this.metadataConfig = HoodieMetadataConfig.newBuilder()
         .fromProperties(configProperties)

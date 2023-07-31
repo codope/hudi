@@ -106,6 +106,7 @@ class SparkHoodieTableFileIndex(spark: SparkSession,
   private lazy val _partitionSchemaFromProperties: StructType = {
     val tableConfig = metaClient.getTableConfig
     val partitionColumns = tableConfig.getPartitionFields
+    val partitionColumnsWithTypes = tableConfig.getPartitionFieldsWithTypes
     val nameFieldMap = generateFieldMap(schema)
 
     if (partitionColumns.isPresent) {

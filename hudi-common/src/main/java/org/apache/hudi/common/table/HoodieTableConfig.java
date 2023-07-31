@@ -53,6 +53,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +71,7 @@ import static org.apache.hudi.common.config.TimestampKeyGeneratorConfig.TIMESTAM
 import static org.apache.hudi.common.config.TimestampKeyGeneratorConfig.TIMESTAMP_OUTPUT_DATE_FORMAT;
 import static org.apache.hudi.common.config.TimestampKeyGeneratorConfig.TIMESTAMP_OUTPUT_TIMEZONE_FORMAT;
 import static org.apache.hudi.common.config.TimestampKeyGeneratorConfig.TIMESTAMP_TIMEZONE_FORMAT;
+import static org.apache.hudi.common.config.TimestampKeyGeneratorConfig.TIMESTAMP_TYPE_FIELD;
 
 /**
  * Configurations on the Hoodie Table like type of ingestion, storage formats, hive table name etc Configurations are loaded from hoodie.properties, these properties are usually set during
@@ -224,6 +226,15 @@ public class HoodieTableConfig extends HoodieConfig {
   public static final ConfigProperty<String> URL_ENCODE_PARTITIONING = KeyGeneratorOptions.URL_ENCODE_PARTITIONING;
   public static final ConfigProperty<String> HIVE_STYLE_PARTITIONING_ENABLE = KeyGeneratorOptions.HIVE_STYLE_PARTITIONING_ENABLE;
 
+  public static final ConfigProperty<String> PARTITION_FIELDS_WITH_TYPES = ConfigProperty
+      .key("hoodie.table.partition.fields.with.types")
+      .noDefaultValue()
+      .sinceVersion("0.14.0")
+      .withDocumentation("Field types of partition fields in case of CustomKeyGenerator. "
+          + "For example, when using custom key generator, if partition fields are `rider:SIMPLE, current_ts:TIMESTAMP`, then "
+          + "this config value will be `rider:SIMPLE, current_ts:TIMESTAMP` and " + PARTITION_FIELDS.key() + " will be `rider,current_ts`. "
+          + "This is used to convert partition values to the correct type before reading/writing.");
+
   public static final List<String> PERSISTED_CONFIG_LIST = Arrays.asList(
       INPUT_TIME_UNIT.key(),
       TIMESTAMP_INPUT_DATE_FORMAT_LIST_DELIMITER_REGEX.key(),
@@ -232,7 +243,8 @@ public class HoodieTableConfig extends HoodieConfig {
       TIMESTAMP_OUTPUT_DATE_FORMAT.key(),
       TIMESTAMP_OUTPUT_TIMEZONE_FORMAT.key(),
       TIMESTAMP_TIMEZONE_FORMAT.key(),
-      DATE_TIME_PARSER.key()
+      DATE_TIME_PARSER.key(),
+      TIMESTAMP_TYPE_FIELD.key()
   );
 
   public static final String NO_OP_BOOTSTRAP_INDEX_CLASS = NoOpBootstrapIndex.class.getName();
@@ -573,6 +585,16 @@ public class HoodieTableConfig extends HoodieConfig {
           .filter(p -> p.length() > 0).collect(Collectors.toList()).toArray(new String[] {}));
     }
     return Option.empty();
+  }
+
+  public Map<String, String> getPartitionFieldsWithTypes() {
+    if (contains(PARTITION_FIELDS_WITH_TYPES)) {
+      return Arrays.stream(getString(PARTITION_FIELDS_WITH_TYPES).split(","))
+          .filter(p -> p.length() > 0)
+          .map(s -> s.split(":"))
+          .collect(Collectors.toMap(a -> a[0], a -> a[1]));
+    }
+    return Collections.emptyMap();
   }
 
   public boolean isTablePartitioned() {

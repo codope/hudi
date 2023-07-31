@@ -344,6 +344,7 @@ object HoodieFileIndex extends Logging {
     }
     val tableConfig = metaClient.getTableConfig
     val partitionColumns = tableConfig.getPartitionFields
+    val paritionColumnsWithTypes = tableConfig.getPartitionFieldsWithTypes
     if (partitionColumns.isPresent) {
       val keyGeneratorClassName = tableConfig.getKeyGeneratorClassName
       // NOTE: A custom key generator with multiple fields could have non-encoded slashes in the partition columns'
