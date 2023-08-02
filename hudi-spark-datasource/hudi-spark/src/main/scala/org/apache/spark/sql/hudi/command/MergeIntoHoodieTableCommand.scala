@@ -342,12 +342,7 @@ case class MergeIntoHoodieTableCommand(mergeInto: MergeIntoTable) extends Hoodie
     val tableMetaCols = mergeInto.targetTable.output.filter(a => isMetaField(a.name))
     val joinData = sparkAdapter.getCatalystPlanUtils.createMITJoin(mergeInto.sourceTable, mergeInto.targetTable, LeftOuter, Some(mergeInto.mergeCondition), "NONE")
     val incomingDataCols = joinData.output.filterNot(mergeInto.targetTable.outputSet.contains)
-    val projectedJoinPlan = if (sparkSession.sqlContext.conf.getConfString(SPARK_SQL_OPTIMIZED_WRITES.key(), SPARK_SQL_OPTIMIZED_WRITES.defaultValue()) == "true") {
-      Project(tableMetaCols ++ incomingDataCols, joinData)
-    } else {
-      Project(incomingDataCols, joinData)
-    }
-
+    val projectedJoinPlan = Project(incomingDataCols, joinData)
     val projectedJoinOutput = projectedJoinPlan.output
 
     val requiredAttributesMap = recordKeyAttributeToConditionExpression ++ preCombineAttributeAssociatedExpression
@@ -622,8 +617,7 @@ case class MergeIntoHoodieTableCommand(mergeInto: MergeIntoTable) extends Hoodie
 
     val hiveSyncConfig = buildHiveSyncConfig(sparkSession, hoodieCatalogTable, tableConfig)
 
-    val enableOptimizedMerge = sparkSession.sqlContext.conf.getConfString(SPARK_SQL_OPTIMIZED_WRITES.key(),
-      SPARK_SQL_OPTIMIZED_WRITES.defaultValue())
+    val enableOptimizedMerge = "false"
 
     val keyGeneratorClassName = if (enableOptimizedMerge == "true") {
       classOf[MergeIntoKeyGenerator].getCanonicalName
