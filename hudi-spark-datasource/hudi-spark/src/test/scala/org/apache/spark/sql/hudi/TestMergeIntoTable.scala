@@ -51,11 +51,11 @@ class TestMergeIntoTable extends HoodieSparkSqlTestBase with ScalaAssertionSuppo
         // First merge with a extra input field 'flag' (insert a new record)
         spark.sql(
           s"""
-             | merge into $tableName
+             | merge into $tableName as t
              | using (
              |  select 1 as id, 'a1' as name, 10 as price, 1000 as ts, '1' as flag
              | ) s0
-             | on s0.id = $tableName.id
+             | on s0.id = t.id
              | when matched and flag = '1' then update set
              | id = s0.id, name = s0.name, price = s0.price, ts = s0.ts
              | when not matched and flag = '1' then insert *
@@ -67,13 +67,13 @@ class TestMergeIntoTable extends HoodieSparkSqlTestBase with ScalaAssertionSuppo
         // Second merge (update the record)
         spark.sql(
           s"""
-             | merge into $tableName
+             | merge into $tableName as t
              | using (
              |  select 1 as id, 'a1' as name, 10 as price, 1001 as ts
              | ) s0
-             | on s0.id = $tableName.id
+             | on s0.id = t.id
              | when matched then update set
-             | id = s0.id, name = s0.name, price = s0.price + $tableName.price, ts = s0.ts
+             | id = s0.id, name = s0.name, price = s0.price + t.price, ts = s0.ts
              | when not matched then insert *
        """.stripMargin)
         checkAnswer(s"select id, name, price, ts from $tableName")(
@@ -83,7 +83,7 @@ class TestMergeIntoTable extends HoodieSparkSqlTestBase with ScalaAssertionSuppo
         // the third time merge (update & insert the record)
         spark.sql(
           s"""
-             | merge into $tableName
+             | merge into $tableName as t
              | using (
              |  select * from (
              |  select 1 as id, 'a1' as name, 10 as price, 1002 as ts
@@ -91,9 +91,9 @@ class TestMergeIntoTable extends HoodieSparkSqlTestBase with ScalaAssertionSuppo
              |  select 2 as id, 'a2' as name, 12 as price, 1001 as ts
              |  )
              | ) s0
-             | on s0.id = $tableName.id
+             | on s0.id = t.id
              | when matched then update set
-             | id = s0.id, name = s0.name, price = s0.price + $tableName.price, ts = s0.ts
+             | id = s0.id, name = s0.name, price = s0.price + t.price, ts = s0.ts
              | when not matched and s0.id % 2 = 0 then insert *
        """.stripMargin)
         checkAnswer(s"select id, name, price, ts from $tableName")(
@@ -104,11 +104,11 @@ class TestMergeIntoTable extends HoodieSparkSqlTestBase with ScalaAssertionSuppo
         // the fourth merge (delete the record)
         spark.sql(
           s"""
-             | merge into $tableName
+             | merge into $tableName as t
              | using (
              |  select 1 as id, 'a1' as name, 12 as price, 1003 as ts
              | ) s0
-             | on s0.id = $tableName.id
+             | on s0.id = t.id
              | when matched and s0.id != 1 then update set
              |    id = s0.id, name = s0.name, price = s0.price, ts = s0.ts
              | when matched and s0.id = 1 then delete

@@ -33,6 +33,7 @@ import org.apache.hudi.util.JFunction.scalaFunction1Noop
 import org.apache.hudi.{AvroConversionUtils, DataSourceWriteOptions, HoodieSparkSqlWriter, HoodieSparkUtils, SparkAdapterSupport}
 import org.apache.spark.sql.HoodieCatalystExpressionUtils.{MatchCast, attributeEquals}
 import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.catalog.HoodieCatalogTable
 import org.apache.spark.sql.catalyst.expressions.BindReferences.bindReference
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, BoundReference, EqualTo, Expression, Literal, NamedExpression, PredicateHelper}
@@ -335,7 +336,18 @@ case class MergeIntoHoodieTableCommand(mergeInto: MergeIntoTable) extends Hoodie
     // Then we want to project the output so that we have the meta columns from the target table
     // followed by the data columns of the source table
     val tableMetaCols = mergeInto.targetTable.output.filter(a => isMetaField(a.name))
-    val joinData = sparkAdapter.getCatalystPlanUtils.createMITJoin(mergeInto.sourceTable, mergeInto.targetTable, LeftOuter, Some(mergeInto.mergeCondition), "NONE")
+    // Extract column names used in the merge condition
+    val columnNames = mergeInto.mergeCondition.references.map(_.name)
+
+    // Create attributes for source and target tables
+    val sourceAttributes: Seq[NamedExpression] = columnNames.map(name => UnresolvedAttribute.quoted(s"source.$name")).toSeq
+    val targetAttributes: Seq[NamedExpression] = columnNames.map(name => UnresolvedAttribute.quoted(s"target.$name")).toSeq
+
+    // Create new logical plans projecting only the specified columns
+    val projectedSourcePlan: LogicalPlan = Project(sourceAttributes, mergeInto.sourceTable)
+    val projectedTargetPlan: LogicalPlan = Project(targetAttributes, mergeInto.targetTable)
+
+    val joinData = sparkAdapter.getCatalystPlanUtils.createMITJoin(projectedSourcePlan, projectedTargetPlan, LeftOuter, Some(mergeInto.mergeCondition), "NONE")
     val incomingDataCols = joinData.output.filterNot(mergeInto.targetTable.outputSet.contains)
     // for pkless table, we need to project the meta columns
     val hasPrimaryKey = hoodieCatalogTable.tableConfig.getRecordKeyFields.isPresent
