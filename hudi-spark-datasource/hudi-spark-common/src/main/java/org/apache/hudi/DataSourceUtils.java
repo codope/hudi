@@ -38,6 +38,7 @@ import org.apache.hudi.common.util.TablePathUtils;
 import org.apache.hudi.config.HoodieCompactionConfig;
 import org.apache.hudi.config.HoodiePayloadConfig;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.data.HoodieJavaRDD;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.TableNotFoundException;
 import org.apache.hudi.table.BulkInsertPartitioner;
@@ -328,5 +329,16 @@ public class DataSourceUtils {
       LOG.warn("Small Decimal Type found in the persisted schema, reverting default value of 'hoodie.parquet.writelegacyformat.enabled' to true");
       properties.put(HoodieStorageConfig.PARQUET_WRITE_LEGACY_FORMAT_ENABLED.key(), "true");
     }
+  }
+
+  public static HoodieWriteResult triggerTagLocationWithReadClient(JavaSparkContext jssc,
+                                                                   JavaRDD<HoodieRecord> hoodieRecords,
+                                                                   HoodieWriteConfig writeConfig) throws HoodieException {
+    HoodieSparkEngineContext engineContext = new HoodieSparkEngineContext(jssc);
+    SparkRDDReadClient readClient = new SparkRDDReadClient(engineContext, writeConfig);
+    long startTime = System.currentTimeMillis();
+    readClient.tagLocation(hoodieRecords).count();
+    LOG.warn("Total tag location time :: " + (System.currentTimeMillis() - startTime));
+    return new HoodieWriteResult(HoodieJavaRDD.getJavaRDD(engineContext.emptyHoodieData()));
   }
 }
