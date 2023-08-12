@@ -156,6 +156,7 @@ import java.util.stream.Stream;
 
 import static org.apache.hudi.common.config.LockConfiguration.FILESYSTEM_LOCK_PATH_PROP_KEY;
 import static org.apache.hudi.common.model.HoodieFailedWritesCleaningPolicy.EAGER;
+import static org.apache.hudi.common.model.HoodieFailedWritesCleaningPolicy.LAZY;
 import static org.apache.hudi.common.table.timeline.HoodieInstant.State.COMPLETED;
 import static org.apache.hudi.common.table.timeline.HoodieInstant.State.INFLIGHT;
 import static org.apache.hudi.common.table.timeline.HoodieInstant.State.REQUESTED;
@@ -1673,6 +1674,39 @@ public class TestHoodieClientOnCopyOnWriteStorage extends HoodieClientTestBase {
     metaClient.reloadActiveTimeline();
     pendingClusteringPlans = ClusteringUtils.getAllPendingClusteringPlans(metaClient).collect(Collectors.toList());
     assertEquals(config.isRollbackPendingClustering() ? 0 : 1, pendingClusteringPlans.size());
+  }
+
+  @Test
+  public void testConcurrentClusteringWithRecordIndex() throws Exception {
+    // setup clustering config with update strategy to allow updates during ingestion
+    HoodieClusteringConfig clusteringConfig = HoodieClusteringConfig.newBuilder()
+        .withClusteringMaxNumGroups(10).withClusteringTargetPartitions(0)
+        .withInlineClustering(true).withInlineClusteringNumCommits(1).build();
+
+    HoodieTableMetaClient metaClient = HoodieTableMetaClient.builder().setConf(hadoopConf).setBasePath(basePath).build();
+    // start clustering, but don't commit keep it inflight
+    List<HoodieRecord> allRecords = testInsertAndClustering(clusteringConfig, true, true);
+    /*List<Pair<HoodieInstant, HoodieClusteringPlan>> pendingClusteringPlans =
+        ClusteringUtils.getAllPendingClusteringPlans(metaClient).collect(Collectors.toList());
+    assertEquals(1, pendingClusteringPlans.size());
+    HoodieInstant pendingClusteringInstant = pendingClusteringPlans.get(0).getLeft();
+    assertEquals(pendingClusteringInstant.getState(), INFLIGHT);*/
+    FileCreateUtils.deleteReplaceCommit(basePath, metaClient.getActiveTimeline().filterCompletedInstants().lastInstant().get().getTimestamp());
+
+    // make an update to a filegroup within the partition that is pending clustering
+    HoodieWriteConfig.Builder cfgBuilder = getConfigBuilder(LAZY);
+    addConfigsForPopulateMetaFields(cfgBuilder, true);
+    cfgBuilder.withClusteringConfig(clusteringConfig);
+    HoodieWriteConfig config = cfgBuilder.build();
+    SparkRDDWriteClient client = getHoodieWriteClient(config);
+    String commitTime = HoodieActiveTimeline.createNewInstantTime();
+    //allRecords.addAll(dataGen.generateUpdates(commitTime, 200));
+    writeAndVerifyBatch(client, dataGen.generateUpdatesForAllRecords(commitTime), commitTime, true);
+
+    // verify inflight clustering was rolled back
+    metaClient.reloadActiveTimeline();
+    /*pendingClusteringPlans = ClusteringUtils.getAllPendingClusteringPlans(metaClient).collect(Collectors.toList());
+    assertEquals(config.isRollbackPendingClustering() ? 0 : 1, pendingClusteringPlans.size());*/
   }
 
   @Test
