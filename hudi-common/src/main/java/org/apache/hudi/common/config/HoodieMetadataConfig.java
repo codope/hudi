@@ -250,14 +250,14 @@ public final class HoodieMetadataConfig extends HoodieConfig {
 
   public static final ConfigProperty<Integer> RECORD_INDEX_MIN_FILE_GROUP_COUNT_PROP = ConfigProperty
       .key(METADATA_PREFIX + ".record.index.min.filegroup.count")
-      .defaultValue(10)
+      .defaultValue(5)
       .markAdvanced()
       .sinceVersion("0.14.0")
       .withDocumentation("Minimum number of file groups to use for Record Index.");
 
   public static final ConfigProperty<Integer> RECORD_INDEX_MAX_FILE_GROUP_COUNT_PROP = ConfigProperty
       .key(METADATA_PREFIX + ".record.index.max.filegroup.count")
-      .defaultValue(10000)
+      .defaultValue(5)
       .markAdvanced()
       .sinceVersion("0.14.0")
       .withDocumentation("Maximum number of file groups to use for Record Index.");

@@ -123,7 +123,7 @@ public class InProcessLockProvider implements LockProvider<ReentrantReadWriteLoc
     if (lock.isWriteLockedByCurrentThread()) {
       lock.writeLock().unlock();
     }
-    LOG.info(getLogMessage(LockState.ALREADY_RELEASED));
+    LOG.info(getLogMessage(LockState.ALREADY_RELEASED) + ", closing the lock provider by: " + getCurrentOwnerLockInfo());
   }
 
   private String getLogMessage(LockState state) {

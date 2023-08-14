@@ -156,6 +156,7 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
   }
 
   public static HoodieBaseFile getLatestBaseFile(HoodieTable<?, ?, ?, ?> hoodieTable, String partitionPath, String fileId) {
+    LOG.warn(">>> getLatestBaseFile called with fileId " + fileId + " partitionPath " + partitionPath);
     Option<HoodieBaseFile> baseFileOp = hoodieTable.getBaseFileOnlyView().getLatestBaseFile(partitionPath, fileId);
     if (!baseFileOp.isPresent()) {
       throw new NoSuchElementException(String.format("FileID %s of partition path %s does not exist.", fileId, partitionPath));

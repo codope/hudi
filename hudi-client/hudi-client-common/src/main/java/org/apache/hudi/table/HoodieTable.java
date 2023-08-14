@@ -56,7 +56,6 @@ import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.table.view.FileSystemViewManager;
 import org.apache.hudi.common.table.view.HoodieTableFileSystemView;
 import org.apache.hudi.common.table.view.SyncableFileSystemView;
-import org.apache.hudi.common.table.view.TableFileSystemView;
 import org.apache.hudi.common.table.view.TableFileSystemView.BaseFileOnlyView;
 import org.apache.hudi.common.table.view.TableFileSystemView.SliceView;
 import org.apache.hudi.common.util.ClusteringUtils;
@@ -218,7 +217,7 @@ public abstract class HoodieTable<T, I, K, O> implements Serializable {
   public abstract HoodieWriteMetadata<O> delete(HoodieEngineContext context, String instantTime, K keys);
 
   /**
-   * Delete records from Hoodie table based on {@link HoodieKey} and {@link HoodieRecordLocation} specified in
+   * Delete records from Hoodie table based on {@link HoodieKey} and {@link org.apache.hudi.common.model.HoodieRecordLocation} specified in
    * preppedRecords.
    *
    * @param context {@link HoodieEngineContext}.
@@ -318,7 +317,7 @@ public abstract class HoodieTable<T, I, K, O> implements Serializable {
   /**
    * Get the view of the file system for this table.
    */
-  public TableFileSystemView getFileSystemView() {
+  public SyncableFileSystemView getFileSystemView() {
     return new HoodieTableFileSystemView(metaClient, getCompletedCommitsTimeline());
   }
 

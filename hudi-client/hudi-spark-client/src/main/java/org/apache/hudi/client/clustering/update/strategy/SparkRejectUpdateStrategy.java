@@ -48,6 +48,7 @@ public class SparkRejectUpdateStrategy<T> extends BaseSparkUpdateStrategy<T> {
   public Pair<HoodieData<HoodieRecord<T>>, Set<HoodieFileGroupId>> handleUpdate(HoodieData<HoodieRecord<T>> taggedRecordsRDD) {
     List<HoodieFileGroupId> fileGroupIdsWithRecordUpdate = getGroupIdsWithUpdate(taggedRecordsRDD);
     fileGroupIdsWithRecordUpdate.forEach(fileGroupIdWithRecordUpdate -> {
+      LOG.warn(">>> fileGroupIdWithRecordUpdate: " + fileGroupIdWithRecordUpdate.toString());
       if (fileGroupsInPendingClustering.contains(fileGroupIdWithRecordUpdate)) {
         String msg = String.format("Not allowed to update the clustering file group %s. "
                 + "For pending clustering operations, we are not going to support update for now.",

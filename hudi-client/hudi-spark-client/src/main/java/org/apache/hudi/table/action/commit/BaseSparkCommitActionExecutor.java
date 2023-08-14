@@ -19,8 +19,8 @@
 package org.apache.hudi.table.action.commit;
 
 import org.apache.hudi.client.WriteStatus;
-import org.apache.hudi.client.utils.SparkPartitionUtils;
 import org.apache.hudi.client.clustering.update.strategy.SparkAllowUpdateStrategy;
+import org.apache.hudi.client.utils.SparkPartitionUtils;
 import org.apache.hudi.client.utils.SparkValidatorUtils;
 import org.apache.hudi.common.data.HoodieData;
 import org.apache.hudi.common.data.HoodieData.HoodieDataCacheKey;
@@ -115,8 +115,10 @@ public abstract class BaseSparkCommitActionExecutor<T> extends
 
   private HoodieData<HoodieRecord<T>> clusteringHandleUpdate(HoodieData<HoodieRecord<T>> inputRecords) {
     context.setJobStatus(this.getClass().getSimpleName(), "Handling updates which are under clustering: " + config.getTableName());
+    table.getFileSystemView().sync();
     Set<HoodieFileGroupId> fileGroupsInPendingClustering =
         table.getFileSystemView().getFileGroupsInPendingClustering().map(Pair::getKey).collect(Collectors.toSet());
+    LOG.warn(">>> FG in pending clustering: " + fileGroupsInPendingClustering);
     // Skip processing if there is no inflight clustering
     if (fileGroupsInPendingClustering.isEmpty()) {
       return inputRecords;
@@ -125,6 +127,7 @@ public abstract class BaseSparkCommitActionExecutor<T> extends
     UpdateStrategy<T, HoodieData<HoodieRecord<T>>> updateStrategy = (UpdateStrategy<T, HoodieData<HoodieRecord<T>>>) ReflectionUtils
         .loadClass(config.getClusteringUpdatesStrategyClass(), new Class<?>[] {HoodieEngineContext.class, HoodieTable.class, Set.class},
             this.context, table, fileGroupsInPendingClustering);
+    LOG.warn(">>> UpdateStrategy class: " + updateStrategy.getClass().getName());
     // For SparkAllowUpdateStrategy with rollback pending clustering as false, need not handle
     // the file group intersection between current ingestion and pending clustering file groups.
     // This will be handled at the conflict resolution strategy.
@@ -138,6 +141,7 @@ public abstract class BaseSparkCommitActionExecutor<T> extends
     if (fileGroupsWithUpdatesAndPendingClustering.isEmpty()) {
       return recordsAndPendingClusteringFileGroups.getLeft();
     }
+    LOG.warn(">>> FG with updates and pending clustering: " + fileGroupsWithUpdatesAndPendingClustering);
     // there are file groups pending clustering and receiving updates, so rollback the pending clustering instants
     // there could be race condition, for example, if the clustering completes after instants are fetched but before rollback completed
     if (config.isRollbackPendingClustering()) {
