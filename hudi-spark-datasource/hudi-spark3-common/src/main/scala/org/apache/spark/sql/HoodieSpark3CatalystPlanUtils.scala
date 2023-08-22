@@ -80,6 +80,11 @@ trait HoodieSpark3CatalystPlanUtils extends HoodieCatalystPlansUtils {
   override def createMITJoin(left: LogicalPlan, right: LogicalPlan, joinType: JoinType, condition: Option[Expression], hint: String): LogicalPlan = {
     Join(left, right, joinType, condition, JoinHint.NONE)
   }
+
+  override def beginTransaction(): String = {
+    // TODO: check BeginMultiTableTransactionCommand
+    super.beginTransaction()
+  }
 }
 
 object HoodieSpark3CatalystPlanUtils extends SparkAdapterSupport {

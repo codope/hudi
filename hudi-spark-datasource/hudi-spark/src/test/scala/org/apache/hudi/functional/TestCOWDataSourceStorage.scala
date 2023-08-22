@@ -70,6 +70,44 @@ class TestCOWDataSourceStorage extends SparkClientFunctionalTestHarness {
 
   @ParameterizedTest
   @CsvSource(value = Array(
+    "true|org.apache.hudi.keygen.SimpleKeyGenerator|_row_key"
+  ), delimiter = '|')
+  def testSimpleCOW(isMetadataEnabled: Boolean, keyGenClass: String, recordKeys: String): Unit = {
+    var options: Map[String, String] = commonOpts ++ Map(
+      HoodieMetadataConfig.ENABLE.key -> String.valueOf(isMetadataEnabled),
+      DataSourceWriteOptions.KEYGENERATOR_CLASS_NAME.key -> keyGenClass,
+      DataSourceWriteOptions.RECORDKEY_FIELD.key -> recordKeys,
+      HoodieWriteConfig.SCHEMA_ALLOW_AUTO_EVOLUTION_COLUMN_DROP.key -> "true")
+
+    val isTimestampBasedKeyGen: Boolean = classOf[TimestampBasedKeyGenerator].getName.equals(keyGenClass)
+    if (isTimestampBasedKeyGen) {
+      options += DataSourceWriteOptions.RECORDKEY_FIELD.key() -> "_row_key"
+      options += TIMESTAMP_TYPE_FIELD.key -> "DATE_STRING"
+      options += TIMESTAMP_INPUT_DATE_FORMAT.key -> "yyyy/MM/dd"
+      options += TIMESTAMP_OUTPUT_DATE_FORMAT.key -> "yyyyMMdd"
+    }
+    val dataGen = new HoodieTestDataGenerator(0xDEED)
+    val fs = FSUtils.getFs(basePath, spark.sparkContext.hadoopConfiguration)
+    // Insert Operation
+    val records0 = recordsToStrings(dataGen.generateInserts("000", 100)).toList
+    val inputDF0 = spark.read.json(spark.sparkContext.parallelize(records0, 2))
+    inputDF0.write.format("org.apache.hudi")
+      .options(options)
+      .option(DataSourceWriteOptions.OPERATION.key, DataSourceWriteOptions.INSERT_OPERATION_OPT_VAL)
+      .mode(SaveMode.Overwrite)
+      .save(basePath)
+
+    assertTrue(HoodieDataSourceHelpers.hasNewCommits(fs, basePath, "000"))
+
+    // Snapshot query
+    val snapshotDF1 = spark.read.format("org.apache.hudi")
+      .option(HoodieMetadataConfig.ENABLE.key, isMetadataEnabled)
+      .load(basePath)
+    assertEquals(100, snapshotDF1.count())
+  }
+
+  @ParameterizedTest
+  @CsvSource(value = Array(
     "true|org.apache.hudi.keygen.SimpleKeyGenerator|_row_key",
     "true|org.apache.hudi.keygen.ComplexKeyGenerator|_row_key,nation.bytes",
     "true|org.apache.hudi.keygen.TimestampBasedKeyGenerator|_row_key",

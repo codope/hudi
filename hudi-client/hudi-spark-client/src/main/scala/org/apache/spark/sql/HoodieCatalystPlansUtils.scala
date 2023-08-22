@@ -122,4 +122,8 @@ trait HoodieCatalystPlansUtils {
   def failAnalysisForMIT(a: Attribute, cols: String): Unit = {}
 
   def createMITJoin(left: LogicalPlan, right: LogicalPlan, joinType: JoinType, condition: Option[Expression], hint: String): LogicalPlan
+
+  def beginTransaction(): String = {
+    throw new UnsupportedOperationException("beginTransaction() is not supported")
+  }
 }

@@ -354,6 +354,11 @@ object HoodieAnalysis extends SparkAdapterSupport {
       sparkAdapter.getCatalystPlanUtils.unapplyCreateTableLikeCommand(plan)
   }
 
+  private[sql] object MatchBeginTransaction {
+    def unapply(plan: LogicalPlan): String =
+      sparkAdapter.getCatalystPlanUtils.beginTransaction()
+  }
+
   private[sql] def failAnalysis(msg: String): Nothing = {
     throw new AnalysisException(msg)
   }

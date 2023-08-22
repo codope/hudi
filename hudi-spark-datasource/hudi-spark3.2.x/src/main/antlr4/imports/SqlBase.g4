@@ -107,6 +107,7 @@ singleTableSchema
 statement
     : query                                                            #statementDefault
     | ctes? dmlStatementNoWith                                         #dmlStatement
+    | transactionBlock                                                 #transactionStatement
     | USE NAMESPACE? multipartIdentifier                               #use
     | CREATE namespace (IF NOT EXISTS)? multipartIdentifier
         (commentSpec |
@@ -453,6 +454,10 @@ dmlStatementNoWith
         ON mergeCondition=booleanExpression
         matchedClause*
         notMatchedClause*                                                          #mergeIntoTable
+    ;
+
+transactionBlock
+    : BEGIN dmlStatementNoWith* END
     ;
 
 queryOrganization
@@ -1287,6 +1292,7 @@ nonReserved
     | ASC
     | AT
     | AUTHORIZATION
+    | BEGIN
     | BETWEEN
     | BOTH
     | BUCKET
@@ -1544,6 +1550,7 @@ AS: 'AS';
 ASC: 'ASC';
 AT: 'AT';
 AUTHORIZATION: 'AUTHORIZATION';
+BEGIN: 'BEGIN';
 BETWEEN: 'BETWEEN';
 BOTH: 'BOTH';
 BUCKET: 'BUCKET';
