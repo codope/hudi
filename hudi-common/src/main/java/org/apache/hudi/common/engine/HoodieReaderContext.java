@@ -44,7 +44,7 @@ import java.util.Map;
  * @param <T> The type of engine-specific record representation, e.g.,{@code InternalRow} in Spark
  *            and {@code RowData} in Flink.
  */
-public abstract class HoodieReaderContext<T> {
+public interface HoodieReaderContext<T> {
   // These internal key names are only used in memory for record metadata and merging,
   // and should not be persisted to storage.
   public static final String INTERNAL_META_RECORD_KEY = "_0";
@@ -144,7 +144,7 @@ public abstract class HoodieReaderContext<T> {
    * @param orderingVal   Ordering value in String.
    * @return A mapping containing the metadata.
    */
-  public Map<String, Object> generateMetadataForRecord(
+  public default Map<String, Object> generateMetadataForRecord(
       String recordKey, String partitionPath, Comparable orderingVal) {
     Map<String, Object> meta = new HashMap<>();
     meta.put(INTERNAL_META_RECORD_KEY, recordKey);
@@ -160,7 +160,7 @@ public abstract class HoodieReaderContext<T> {
    * @param schema The Avro schema of the record.
    * @return A mapping containing the metadata.
    */
-  public Map<String, Object> generateMetadataForRecord(T record, Schema schema) {
+  public default Map<String, Object> generateMetadataForRecord(T record, Schema schema) {
     Map<String, Object> meta = new HashMap<>();
     meta.put(INTERNAL_META_RECORD_KEY, getRecordKey(record, schema));
     return meta;

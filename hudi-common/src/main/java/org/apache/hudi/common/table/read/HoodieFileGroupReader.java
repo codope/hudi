@@ -37,7 +37,6 @@ import org.apache.hudi.common.util.collection.Pair;
 
 import org.apache.avro.Schema;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
 import java.io.Closeable;
@@ -188,10 +187,9 @@ public final class HoodieFileGroupReader<T> implements Closeable {
 
   private void scanLogFiles() {
     if (logFilePathList.isPresent()) {
-      FileSystem fs = readerContext.getFs(logFilePathList.get().get(0), hadoopConf);
       HoodieMergedLogRecordReader<T> logRecordReader = HoodieMergedLogRecordReader.newBuilder()
           .withHoodieReaderContext(readerContext)
-          .withFileSystem(fs)
+          .withFileSystem(readerContext.getFs(logFilePathList.get().get(0), hadoopConf))
           .withBasePath(readerState.tablePath)
           .withLogFilePaths(logFilePathList.get())
           .withLatestInstantTime(readerState.latestCommitTime)

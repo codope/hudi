@@ -72,7 +72,6 @@ public class HoodieMergedLogRecordReader<T> extends BaseHoodieLogRecordReader<T>
   // Stores the total time taken to perform reading and merging of log blocks
   private long totalTimeTakenToReadAndMergeBlocks;
 
-  @SuppressWarnings("unchecked")
   private HoodieMergedLogRecordReader(HoodieReaderContext<T> readerContext,
                                       FileSystem fs, String basePath, List<String> logFilePaths, Schema readerSchema,
                                       String latestInstantTime, boolean readBlocksLazily,

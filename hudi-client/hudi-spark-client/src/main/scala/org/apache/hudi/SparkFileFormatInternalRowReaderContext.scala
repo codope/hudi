@@ -27,23 +27,23 @@ import org.apache.hudi.common.util.collection.ClosableIterator
 import org.apache.hudi.util.CloseableInternalRowIterator
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
+import org.apache.spark.sql.hudi.SparkAdapter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{HoodieInternalRowUtils, SparkSession}
 
 /**
- * Implementation of {@link HoodieReaderContext} to read {@link InternalRow}s with
- * {@link ParquetFileFormat} on Spark.
+ * Implementation of [[HoodieReaderContext]] to read [[InternalRow]]s with [[ParquetFileFormat]] on Spark.
  *
  * This uses Spark parquet reader to read parquet data files or parquet log blocks.
  *
- * @param sparkSession      {@link SparkSession} instance.
- * @param parquetFileFormat {@link ParquetFileFormat} instance for parquet file format in Spark.
+ * @param sparkSession      [[SparkSession]] instance.
+ * @param parquetFileFormat [[ParquetFileFormat]] instance for parquet file format in Spark.
  * @param hadoopConf        Hadoop configuration.
  */
 class SparkFileFormatInternalRowReaderContext(sparkSession: SparkSession,
                                               parquetFileFormat: ParquetFileFormat,
                                               hadoopConf: Configuration) extends BaseSparkInternalRowReaderContext {
-  lazy val sparkAdapter = SparkAdapterSupport.sparkAdapter
+  lazy val sparkAdapter: SparkAdapter = SparkAdapterSupport.sparkAdapter
 
   override def getFileRecordIterator(filePath: Path,
                                      start: Long,
@@ -52,7 +52,7 @@ class SparkFileFormatInternalRowReaderContext(sparkSession: SparkSession,
                                      requiredSchema: Schema,
                                      conf: Configuration): ClosableIterator[InternalRow] = {
     val fileInfo = sparkAdapter.getSparkPartitionedFileUtils.createPartitionedFile(
-      InternalRow.empty, filePath, 0, length)
+      InternalRow.empty, filePath, start, length)
 
     val dataStructSchema = HoodieInternalRowUtils.getCachedSchema(dataSchema)
     val requiredStructSchema = HoodieInternalRowUtils.getCachedSchema(requiredSchema)

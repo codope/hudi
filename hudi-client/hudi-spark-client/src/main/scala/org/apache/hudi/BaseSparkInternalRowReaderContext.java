@@ -48,7 +48,7 @@ import static org.apache.hudi.common.model.HoodieRecordMerger.DEFAULT_MERGER_STR
  * An abstract class implementing {@link HoodieReaderContext} to handle {@link InternalRow}s.
  * Subclasses need to implement {@link #getFileRecordIterator} with the reader logic.
  */
-public abstract class BaseSparkInternalRowReaderContext extends HoodieReaderContext<InternalRow> {
+public abstract class BaseSparkInternalRowReaderContext implements HoodieReaderContext<InternalRow> {
   @Override
   public FileSystem getFs(String path, Configuration conf) {
     return FSUtils.getFs(path, conf);
