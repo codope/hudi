@@ -31,7 +31,8 @@ import org.apache.hudi.{DataSourceWriteOptions, HoodieCLIUtils, HoodieSparkUtils
 import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.hudi.HoodieSparkSqlTestBase.getLastCommitMetadata
 import org.apache.spark.sql.hudi.command.HoodieSparkValidateDuplicateKeyRecordMerger
-import org.junit.jupiter.api.Assertions.assertEquals
+import org.apache.spark.sql.types.IntegerType
+import org.junit.jupiter.api.Assertions.{assertEquals, assertTrue}
 
 import java.io.File
 
@@ -45,7 +46,7 @@ class TestInsertTable extends HoodieSparkSqlTestBase {
         s"""
            |create table $tableName (
            |  id int,
-           |  dt string,
+           |  dt int,
            |  name string,
            |  price double,
            |  ts long
@@ -59,15 +60,18 @@ class TestInsertTable extends HoodieSparkSqlTestBase {
       spark.sql(
         s"""
            | insert into $tableName values
-           | (1, 'a1', 10, 1000, "2021-01-05"),
-           | (2, 'a2', 20, 2000, "2021-01-06"),
-           | (3, 'a3', 30, 3000, "2021-01-07")
+           | (1, 'a1', 10, 1000, 20210105),
+           | (2, 'a2', 20, 2000, 20210106),
+           | (3, 'a3', 30, 3000, 20210107)
               """.stripMargin)
 
+      val df = spark.read.format("hudi").load(tmp.getCanonicalPath)
+      assertTrue(df.schema("dt").dataType.equals(IntegerType))
+
       checkAnswer(s"select id, name, price, ts, dt from $tableName")(
-        Seq(1, "a1", 10.0, 1000, "2021-01-05"),
-        Seq(2, "a2", 20.0, 2000, "2021-01-06"),
-        Seq(3, "a3", 30.0, 3000, "2021-01-07")
+        Seq(1, "a1", 10.0, 1000, 20210105),
+        Seq(2, "a2", 20.0, 2000, 20210106),
+        Seq(3, "a3", 30.0, 3000, 20210107)
       )
     })
   }
