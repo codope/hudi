@@ -224,7 +224,8 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
     if (dataMetaClient.getFunctionalIndexMetadata().isPresent()) {
       this.enabledPartitionTypes.add(FUNCTIONAL_INDEX);
     }
-    if (metadataConfig.isPartitionStatsIndexEnabled() || dataMetaClient.getTableConfig().isMetadataPartitionAvailable(PARTITION_STATS)) {
+    if ((metadataConfig.isPartitionStatsIndexEnabled() && !metadataConfig.getColumnsEnabledForColumnStatsIndex().isEmpty())
+        || dataMetaClient.getTableConfig().isMetadataPartitionAvailable(PARTITION_STATS)) {
       this.enabledPartitionTypes.add(PARTITION_STATS);
     }
   }
@@ -440,6 +441,10 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
             fileGroupCountAndRecordsPair = initializeFunctionalIndexPartition(functionalIndexPartitionsToInit.iterator().next());
             break;
           case PARTITION_STATS:
+            if (getRecordsGenerationParams().getTargetColumnsForColumnStatsIndex().isEmpty()) {
+              LOG.warn("Skipping partition stats index initialization as target columns are not set");
+              continue;
+            }
             fileGroupCountAndRecordsPair = initializePartitionStatsIndex(partitionInfoList);
             break;
           default:
