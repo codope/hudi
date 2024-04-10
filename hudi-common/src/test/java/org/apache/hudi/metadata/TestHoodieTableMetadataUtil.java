@@ -19,6 +19,7 @@
 
 package org.apache.hudi.metadata;
 
+import org.apache.hudi.common.config.HoodieMetadataConfig;
 import org.apache.hudi.common.data.HoodieData;
 import org.apache.hudi.common.engine.EngineType;
 import org.apache.hudi.common.engine.HoodieLocalEngineContext;
@@ -121,17 +122,13 @@ public class TestHoodieTableMetadataUtil extends HoodieCommonTestHarness {
     HoodieData<HoodieRecord> result = HoodieTableMetadataUtil.convertFilesToPartitionStatsRecords(
         engineContext,
         partitionInfoList,
-        new MetadataRecordsGenerationParams(
-            metaClient,
-            Arrays.asList(MetadataPartitionType.PARTITION_STATS, MetadataPartitionType.COLUMN_STATS),
-            "",
-            1,
-            true,
-            1,
-            columnsToIndex,
-            Collections.emptyList(),
-            true,
-            1));
+        HoodieMetadataConfig.newBuilder().enable(true)
+            .withMetadataIndexColumnStats(true)
+            .withMetadataIndexPartitionStats(true)
+            .withColumnStatsIndexForColumns("rider,driver")
+            .withPartitionStatsIndexParallelism(1)
+            .build(),
+        metaClient);
     // Validate the result.
     List<HoodieRecord> records = result.collectAsList();
     // 3 partitions * 2 columns = 6 partition stats records

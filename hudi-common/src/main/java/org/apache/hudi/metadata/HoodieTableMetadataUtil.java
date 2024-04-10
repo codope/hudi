@@ -1942,23 +1942,20 @@ public class HoodieTableMetadataUtil {
 
   public static HoodieData<HoodieRecord> convertFilesToPartitionStatsRecords(HoodieEngineContext engineContext,
                                                                              List<DirectoryInfo> partitionInfoList,
-                                                                             MetadataRecordsGenerationParams recordsGenerationParams) {
-    // Find the columns to index
-    HoodieTableMetaClient dataTableMetaClient = recordsGenerationParams.getDataMetaClient();
-    final List<String> columnsToIndex = getColumnsToIndex(
-        recordsGenerationParams,
-        Lazy.lazily(() -> tryResolveSchemaForTable(dataTableMetaClient)));
+                                                                             HoodieMetadataConfig metadataConfig,
+                                                                             HoodieTableMetaClient dataTableMetaClient) {
+    final List<String> columnsToIndex = metadataConfig.getColumnsEnabledForColumnStatsIndex();
     if (columnsToIndex.isEmpty()) {
       return engineContext.emptyHoodieData();
     }
-    LOG.debug(String.format("Indexing %d columns for partition stats index", columnsToIndex.size()));
+    LOG.debug("Indexing following columns for partition stats index: {}", columnsToIndex);
     // Create records for MDT
-    int parallelism = Math.max(Math.min(partitionInfoList.size(), recordsGenerationParams.getPartitionStatsIndexParallelism()), 1);
+    int parallelism = Math.max(Math.min(partitionInfoList.size(), metadataConfig.getPartitionStatsIndexParallelism()), 1);
     return engineContext.parallelize(partitionInfoList, parallelism).flatMap(partitionInfo -> {
-      final String partitionName = partitionInfo.getRelativePath();
+      final String partitionPath = partitionInfo.getRelativePath();
       // Step 1: Collect Column Metadata for Each File (Your existing code does this)
       List<List<HoodieColumnRangeMetadata<Comparable>>> fileColumnMetadata = partitionInfo.getFileNameToSizeMap().keySet().stream()
-          .map(fileName -> getFileStatsRangeMetadata(partitionName, partitionName + "/" + fileName, dataTableMetaClient, columnsToIndex, false))
+          .map(fileName -> getFileStatsRangeMetadata(partitionPath, partitionPath + "/" + fileName, dataTableMetaClient, columnsToIndex, false))
           .collect(toList());
       // Step 2: Flatten and Group by Column Name
       Map<String, List<HoodieColumnRangeMetadata<Comparable>>> columnMetadataMap = fileColumnMetadata.stream()
@@ -1967,7 +1964,7 @@ public class HoodieTableMetadataUtil {
       // Step 3: Aggregate Column Ranges
       Stream<HoodieColumnRangeMetadata<Comparable>> partitionStatsRangeMetadata = columnMetadataMap.entrySet().stream()
           .map(entry -> BaseFileUtils.getColumnRangeInPartition(entry.getValue()));
-      return HoodieMetadataPayload.createPartitionStatsRecords(partitionName, partitionStatsRangeMetadata.collect(toList()), false).iterator();
+      return HoodieMetadataPayload.createPartitionStatsRecords(partitionPath, partitionStatsRangeMetadata.collect(toList()), false).iterator();
     });
   }
 

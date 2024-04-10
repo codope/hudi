@@ -91,7 +91,7 @@ public abstract class BaseFileUtils {
     final T minValue;
     final T maxValue;
     if (one.getMinValue() != null && another.getMinValue() != null) {
-      minValue = one.getMinValue().toString().compareTo(another.getMinValue().toString()) < 0 ? one.getMinValue() : another.getMinValue();
+      minValue = one.getMinValue().compareTo(another.getMinValue()) < 0 ? one.getMinValue() : another.getMinValue();
     } else if (one.getMinValue() == null) {
       minValue = another.getMinValue();
     } else {
@@ -99,7 +99,7 @@ public abstract class BaseFileUtils {
     }
 
     if (one.getMaxValue() != null && another.getMaxValue() != null) {
-      maxValue = one.getMaxValue().toString().compareTo(another.getMaxValue().toString()) < 0 ? another.getMaxValue() : one.getMaxValue();
+      maxValue = one.getMaxValue().compareTo(another.getMaxValue()) < 0 ? another.getMaxValue() : one.getMaxValue();
     } else if (one.getMaxValue() == null) {
       maxValue = another.getMaxValue();
     } else {

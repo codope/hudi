@@ -676,8 +676,8 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
     });
   }
 
-  public static String getPartitionStatsIndexKey(String partitionName, HoodieColumnRangeMetadata<Comparable> columnRangeMetadata) {
-    final PartitionIndexID partitionIndexID = new PartitionIndexID(HoodieTableMetadataUtil.getColumnStatsIndexPartitionIdentifier(partitionName));
+  public static String getPartitionStatsIndexKey(String partitionPath, HoodieColumnRangeMetadata<Comparable> columnRangeMetadata) {
+    final PartitionIndexID partitionIndexID = new PartitionIndexID(HoodieTableMetadataUtil.getColumnStatsIndexPartitionIdentifier(partitionPath));
     final ColumnIndexID columnIndexID = new ColumnIndexID(columnRangeMetadata.getColumnName());
     return columnIndexID.asBase64EncodedString().concat(partitionIndexID.asBase64EncodedString());
   }
