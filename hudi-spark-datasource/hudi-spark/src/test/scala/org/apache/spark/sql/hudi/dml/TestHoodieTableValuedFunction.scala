@@ -691,4 +691,62 @@ class TestHoodieTableValuedFunction extends HoodieSparkSqlTestBase {
     }
     spark.sessionState.conf.unsetConf(SPARK_SQL_INSERT_INTO_OPERATION.key)
   }
+
+  test(s"Test hudi_metadata Table-Valued Function For COLUMN_STATS index") {
+    if (HoodieSparkUtils.gteqSpark3_2) {
+      withTempDir { tmp =>
+        Seq("mor").foreach { tableType =>
+          val tableName = generateTableName
+          val identifier = tableName
+          spark.sql("set " + SPARK_SQL_INSERT_INTO_OPERATION.key + "=upsert")
+          spark.sql(
+            s"""
+               |create table $tableName (
+               |  id int,
+               |  name string,
+               |  ts long,
+               |  price int
+               |) using hudi
+               |partitioned by (ts)
+               |tblproperties (
+               |  type = '$tableType',
+               |  primaryKey = 'id',
+               |  preCombineField = 'ts',
+               |  hoodie.datasource.write.recordkey.field = 'id',
+               |  hoodie.metadata.index.column.stats.enable = 'true',
+               |  hoodie.metadata.index.column.stats.column.list = 'ts'
+               |)
+               |location '${tmp.getCanonicalPath}/$tableName'
+               |""".stripMargin
+          )
+
+          spark.sql(
+            s"""
+               | insert into $tableName
+               | values (1, 'a1', 1000, 10), (2, 'a2', 2000, 20), (3, 'a3', 3000, 30), (4, 'a4', 2000, 10), (5, 'a5', 3000, 20), (6, 'a6', 4000, 30)
+               | """.stripMargin
+          )
+
+          var createIndexSql = s"create index idx_datestr on $tableName using column_stats(ts) options(func='from_unixtime', format='yyyy-MM-dd')"
+          spark.sql(createIndexSql)
+
+          val result4DF = spark.sql(
+            s"select * from hudi_metadata('$identifier') where type=3"
+          )
+          assert(result4DF.count() == 7)
+          checkAnswer(spark.sql(s"select ColumnStatsMetadata.minValue.member1.value from hudi_metadata('$identifier') where type=3").collect())(
+            Seq(1000),
+            Seq(2000),
+            Seq(3000)
+          )
+          checkAnswer(spark.sql(s"select ColumnStatsMetadata.maxValue.member1.value from hudi_metadata('$identifier') where type=3").collect())(
+            Seq(2000),
+            Seq(3000),
+            Seq(4000)
+          )
+        }
+      }
+    }
+    spark.sessionState.conf.unsetConf(SPARK_SQL_INSERT_INTO_OPERATION.key)
+  }
 }
