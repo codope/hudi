@@ -193,7 +193,7 @@ abstract class HoodieCDCTestBase extends HoodieSparkClientTestBase {
   protected def checkCDCDataForDelete(loggingMode: HoodieCDCSupplementalLoggingMode,
                                       cdcSchema: Schema,
                                       cdcRecords: Seq[IndexedRecord],
-                                      deletedKeys: java.util.List[HoodieKey]): Unit = {
+                                      deletedKeys: java.util.List[HoodieKey[_]]): Unit = {
     val cdcRecord = cdcRecords.head.asInstanceOf[GenericRecord]
     // check schema
     assertEquals(cdcRecord.getSchema, cdcSchema)

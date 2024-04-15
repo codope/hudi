@@ -36,25 +36,25 @@ import java.util.Objects;
  *
  *       Check out HUDI-5760 for more details
  */
-public class HoodieKey implements Serializable {
+public class HoodieKey<T extends Serializable> implements Serializable {
 
-  private String recordKey;
+  private T recordKey;
   private String partitionPath;
 
   // Required for serializer
   public HoodieKey() {}
 
-  public HoodieKey(String recordKey, String partitionPath) {
+  public HoodieKey(T recordKey, String partitionPath) {
     this.recordKey = recordKey;
     this.partitionPath = partitionPath;
   }
 
-  public void setRecordKey(String recordKey) {
+  public void setRecordKey(T recordKey) {
     this.recordKey = recordKey;
   }
 
   public String getRecordKey() {
-    return recordKey;
+    return recordKey.toString();
   }
 
   public void setPartitionPath(String partitionPath) {

@@ -142,7 +142,7 @@ class TestHoodieRecordSerialization extends SparkClientFunctionalTestHarness {
   }
 
 
-  private def toLegacyAvroRecord(avroRecord: GenericRecord, key: HoodieKey): HoodieAvroRecord[OverwriteWithLatestAvroPayload] = {
+  private def toLegacyAvroRecord(avroRecord: GenericRecord, key: HoodieKey[String]): HoodieAvroRecord[OverwriteWithLatestAvroPayload] = {
     val avroRecordPayload = new OverwriteWithLatestAvroPayloadWithEquality(avroRecord, 0)
     val legacyRecord = new HoodieAvroRecord[OverwriteWithLatestAvroPayload](key, avroRecordPayload)
 

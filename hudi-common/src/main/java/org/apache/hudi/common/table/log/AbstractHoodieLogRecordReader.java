@@ -147,6 +147,7 @@ public abstract class AbstractHoodieLogRecordReader {
   private final List<String> validBlockInstants = new ArrayList<>();
   // Use scanV2 method.
   private final boolean enableOptimizedLogBlocksScan;
+  private final boolean shouldMergeMetadataLogRecords;
 
   protected AbstractHoodieLogRecordReader(FileSystem fs, String basePath, List<String> logFilePaths,
                                           Schema readerSchema, String latestInstantTime,
@@ -157,7 +158,8 @@ public abstract class AbstractHoodieLogRecordReader {
                                           Option<String> keyFieldOverride,
                                           boolean enableOptimizedLogBlocksScan,
                                           HoodieRecordMerger recordMerger,
-                                          Option<HoodieTableMetaClient> hoodieTableMetaClientOption) {
+                                          Option<HoodieTableMetaClient> hoodieTableMetaClientOption,
+                                          boolean shouldMergeMetadataLogRecords) {
     this.readerSchema = readerSchema;
     this.latestInstantTime = latestInstantTime;
     this.hoodieTableMetaClient = hoodieTableMetaClientOption.orElseGet(() -> HoodieTableMetaClient.builder().setConf(fs.getConf()).setBasePath(basePath).build());
@@ -182,6 +184,7 @@ public abstract class AbstractHoodieLogRecordReader {
     this.forceFullScan = forceFullScan;
     this.internalSchema = internalSchema == null ? InternalSchema.getEmptyInternalSchema() : internalSchema;
     this.enableOptimizedLogBlocksScan = enableOptimizedLogBlocksScan;
+    this.shouldMergeMetadataLogRecords = shouldMergeMetadataLogRecords;
 
     if (keyFieldOverride.isPresent()) {
       // NOTE: This branch specifically is leveraged handling Metadata Table
@@ -1024,6 +1027,10 @@ public abstract class AbstractHoodieLogRecordReader {
     }
 
     public Builder withOptimizedLogBlocksScan(boolean enableOptimizedLogBlocksScan) {
+      throw new UnsupportedOperationException();
+    }
+
+    public Builder shouldMergeMetadataLogRecords(boolean shouldMergeMetadataLogRecords) {
       throw new UnsupportedOperationException();
     }
 

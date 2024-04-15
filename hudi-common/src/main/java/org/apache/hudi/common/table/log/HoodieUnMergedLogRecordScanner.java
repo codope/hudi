@@ -49,7 +49,7 @@ public class HoodieUnMergedLogRecordScanner extends AbstractHoodieLogRecordReade
                                          Option<HoodieTableMetaClient> hoodieTableMetaClientOption) {
     super(fs, basePath, logFilePaths, readerSchema, latestInstantTime, reverseReader, bufferSize, instantRange,
         false, true, Option.empty(), internalSchema, Option.empty(), enableOptimizedLogBlocksScan, recordMerger,
-         hoodieTableMetaClientOption);
+         hoodieTableMetaClientOption, false);
     this.callback = callback;
   }
 

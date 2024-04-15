@@ -213,7 +213,7 @@ class TestDataSourceDefaults extends ScalaAssertionSupport {
     var converterFn: Function1[Row, GenericRecord] = _
     var internalConverterFn: Function1[InternalRow, GenericRecord] = _
 
-    override def getKey(record: GenericRecord): HoodieKey = {
+    override def getKey(record: GenericRecord): HoodieKey[_] = {
       new HoodieKey(HoodieAvroUtils.getNestedFieldValAsString(record, recordKeyProp, true, false),
         HoodieAvroUtils.getNestedFieldValAsString(record, partitionPathProp, true, false))
     }

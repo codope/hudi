@@ -52,7 +52,7 @@ class HoodieSparkKryoRegistrar extends HoodieCommonKryoRegistrar with KryoRegist
     ///////////////////////////////////////////////////////////////////////////
     super[HoodieCommonKryoRegistrar].registerClasses(kryo)
 
-    kryo.register(classOf[HoodieKey], new HoodieKeySerializer)
+    kryo.register(classOf[HoodieKey[_]], new HoodieKeySerializer)
 
     kryo.register(classOf[HoodieWriteConfig])
 
@@ -68,13 +68,13 @@ class HoodieSparkKryoRegistrar extends HoodieCommonKryoRegistrar with KryoRegist
    * NOTE: This {@link Serializer} could deserialize instance of {@link HoodieKey} serialized
    *       by implicitly generated Kryo serializer (based on {@link com.esotericsoftware.kryo.serializers.FieldSerializer}
    */
-  class HoodieKeySerializer extends Serializer[HoodieKey] {
-    override def write(kryo: Kryo, output: Output, key: HoodieKey): Unit = {
+  class HoodieKeySerializer extends Serializer[HoodieKey[_]] {
+    override def write(kryo: Kryo, output: Output, key: HoodieKey[_]): Unit = {
       output.writeString(key.getRecordKey)
       output.writeString(key.getPartitionPath)
     }
 
-    override def read(kryo: Kryo, input: Input, klass: Class[HoodieKey]): HoodieKey = {
+    override def read(kryo: Kryo, input: Input, klass: Class[HoodieKey[_]]): HoodieKey[_] = {
       val recordKey = input.readString()
       val partitionPath = input.readString()
       new HoodieKey(recordKey, partitionPath)

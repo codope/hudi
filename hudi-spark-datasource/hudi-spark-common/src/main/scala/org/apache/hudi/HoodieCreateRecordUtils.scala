@@ -125,7 +125,7 @@ object HoodieCreateRecordUtils {
 
           // handle dropping partition columns
           it.map { avroRec =>
-            val (hoodieKey: HoodieKey, recordLocation: Option[HoodieRecordLocation]) = HoodieCreateRecordUtils.getHoodieKeyAndMaybeLocationFromAvroRecord(keyGenerator, avroRec,
+            val (hoodieKey: HoodieKey[_], recordLocation: Option[HoodieRecordLocation]) = HoodieCreateRecordUtils.getHoodieKeyAndMaybeLocationFromAvroRecord(keyGenerator, avroRec,
               preppedSparkSqlWrites || preppedWriteOperation, preppedSparkSqlWrites || preppedWriteOperation || preppedSparkSqlMergeInto)
             val avroRecWithoutMeta: GenericRecord = if (preppedSparkSqlWrites || preppedSparkSqlMergeInto || preppedWriteOperation) {
               HoodieAvroUtils.rewriteRecord(avroRec, HoodieAvroUtils.removeMetadataFields(dataFileSchema))
@@ -177,7 +177,7 @@ object HoodieCreateRecordUtils {
           val finalStructTypeRowWriter = getCachedUnsafeRowWriter(sourceStructType, finalStructType)
 
           it.map { sourceRow =>
-            val (key: HoodieKey, recordLocation: Option[HoodieRecordLocation]) =
+            val (key: HoodieKey[_], recordLocation: Option[HoodieRecordLocation]) =
               HoodieCreateRecordUtils.getHoodieKeyAndMayBeLocationFromSparkRecord(sparkKeyGenerator, sourceRow, sourceStructType,
                 preppedSparkSqlWrites || preppedWriteOperation, preppedSparkSqlWrites || preppedWriteOperation || preppedSparkSqlMergeInto)
             val targetRow = finalStructTypeRowWriter(sourceRow)
@@ -193,7 +193,7 @@ object HoodieCreateRecordUtils {
 
   def getHoodieKeyAndMaybeLocationFromAvroRecord(keyGenerator: Option[BaseKeyGenerator], avroRec: GenericRecord,
                                                  useMetaFieldsForRecordKeyAndPartition: Boolean, fetchRecordLocationFromMetaFields: Boolean):
-  (HoodieKey, Option[HoodieRecordLocation]) = {
+  (HoodieKey[_], Option[HoodieRecordLocation]) = {
     //use keygen for sqlMergeIntoPrepped recordKey and partitionPath because the keygenerator handles
     //fetching from the meta fields if they are populated and otherwise doing keygen
     val recordKey = if (useMetaFieldsForRecordKeyAndPartition) {
@@ -233,7 +233,7 @@ object HoodieCreateRecordUtils {
   def getHoodieKeyAndMayBeLocationFromSparkRecord(sparkKeyGenerator: Option[SparkKeyGeneratorInterface],
                                                   sourceRow: InternalRow, schema: StructType,
                                                   useMetaFieldsForRecordKeyAndPartition: Boolean,
-                                                  fetchRecordLocationFromMetaFields: Boolean): (HoodieKey, Option[HoodieRecordLocation]) = {
+                                                  fetchRecordLocationFromMetaFields: Boolean): (HoodieKey[_], Option[HoodieRecordLocation]) = {
     //use keygen for sqlMergeIntoPrepped recordKey and partitionPath because the keygenerator handles
     //fetching from the meta fields if they are populated and otherwise doing keygen
     val recordKey = if (useMetaFieldsForRecordKeyAndPartition) {
