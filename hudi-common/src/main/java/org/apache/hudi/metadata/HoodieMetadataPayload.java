@@ -101,17 +101,6 @@ import static org.apache.hudi.metadata.HoodieTableMetadata.RECORDKEY_PARTITION_L
 public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadataPayload> {
   private static final Logger LOG = LoggerFactory.getLogger(HoodieMetadataPayload.class);
   /**
-   * Type of the record. This can be an enum in the schema but Avro1.8
-   * has a bug - <a href="https://issues.apache.org/jira/browse/AVRO-1810">...</a>
-   */
-  private static final int METADATA_TYPE_PARTITION_LIST = 1;
-  private static final int METADATA_TYPE_FILE_LIST = 2;
-  private static final int METADATA_TYPE_COLUMN_STATS = 3;
-  private static final int METADATA_TYPE_BLOOM_FILTER = 4;
-  private static final int METADATA_TYPE_RECORD_INDEX = 5;
-  private static final int METADATA_TYPE_PARTITION_STATS = 6;
-
-  /**
    * HoodieMetadata schema field ids
    */
   public static final String KEY_FIELD_NAME = HoodieAvroHFileReaderImplBase.KEY_FIELD_NAME;
@@ -202,7 +191,7 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
       key = record.get(KEY_FIELD_NAME).toString();
       type = (int) record.get(SCHEMA_FIELD_NAME_TYPE);
 
-      if (type == METADATA_TYPE_FILE_LIST || type == METADATA_TYPE_PARTITION_LIST) {
+      if (type == MetadataPartitionType.FILES.getId("") || type == MetadataPartitionType.FILES.getId(RECORDKEY_PARTITION_LIST)) {
         Map<String, HoodieMetadataFileInfo> metadata = getNestedFieldValue(record, SCHEMA_FIELD_NAME_METADATA);
         if (metadata != null) {
           filesystemMetadata = metadata;
@@ -211,14 +200,14 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
             filesystemMetadata.put(k, new HoodieMetadataFileInfo((Long) v.get("size"), (Boolean) v.get("isDeleted")));
           });
         }
-      } else if (type == METADATA_TYPE_BLOOM_FILTER) {
+      } else if (type == MetadataPartitionType.BLOOM_FILTERS.getId("")) {
         GenericRecord bloomFilterRecord = getNestedFieldValue(record, SCHEMA_FIELD_ID_BLOOM_FILTER);
         // NOTE: Only legitimate reason for {@code BloomFilterMetadata} to not be present is when
         //       it's not been read from the storage (ie it's not been a part of projected schema).
         //       Otherwise, it has to be present or the record would be considered invalid
         if (bloomFilterRecord == null) {
           checkArgument(record.getSchema().getField(SCHEMA_FIELD_ID_BLOOM_FILTER) == null,
-              String.format("Valid %s record expected for type: %s", SCHEMA_FIELD_ID_BLOOM_FILTER, METADATA_TYPE_BLOOM_FILTER));
+              String.format("Valid %s record expected for type: %s", SCHEMA_FIELD_ID_BLOOM_FILTER, MetadataPartitionType.BLOOM_FILTERS.getId("")));
         } else {
           bloomFilterMetadata = new HoodieMetadataBloomFilter(
               (String) bloomFilterRecord.get(BLOOM_FILTER_FIELD_TYPE),
@@ -227,14 +216,14 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
               (Boolean) bloomFilterRecord.get(BLOOM_FILTER_FIELD_IS_DELETED)
           );
         }
-      } else if (type == METADATA_TYPE_COLUMN_STATS || type == METADATA_TYPE_PARTITION_STATS) {
+      } else if (type == MetadataPartitionType.COLUMN_STATS.getId("") || type == MetadataPartitionType.PARTITION_STATS.getId("")) {
         GenericRecord columnStatsRecord = getNestedFieldValue(record, SCHEMA_FIELD_ID_COLUMN_STATS);
         // NOTE: Only legitimate reason for {@code ColumnStatsMetadata} to not be present is when
         //       it's not been read from the storage (ie it's not been a part of projected schema).
         //       Otherwise, it has to be present or the record would be considered invalid
         if (columnStatsRecord == null) {
           checkArgument(record.getSchema().getField(SCHEMA_FIELD_ID_COLUMN_STATS) == null,
-              String.format("Valid %s record expected for type: %s", SCHEMA_FIELD_ID_COLUMN_STATS, METADATA_TYPE_COLUMN_STATS));
+              String.format("Valid %s record expected for type: %s", SCHEMA_FIELD_ID_COLUMN_STATS, MetadataPartitionType.COLUMN_STATS.getId("")));
         } else {
           columnStatMetadata = HoodieMetadataColumnStats.newBuilder(METADATA_COLUMN_STATS_BUILDER_STUB.get())
               .setFileName((String) columnStatsRecord.get(COLUMN_STATS_FIELD_FILE_NAME))
@@ -251,7 +240,7 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
               .setIsDeleted((Boolean) columnStatsRecord.get(COLUMN_STATS_FIELD_IS_DELETED))
               .build();
         }
-      } else if (type == METADATA_TYPE_RECORD_INDEX) {
+      } else if (type == MetadataPartitionType.RECORD_INDEX.getId("")) {
         GenericRecord recordIndexRecord = getNestedFieldValue(record, SCHEMA_FIELD_ID_RECORD_INDEX);
         recordIndexMetadata = new HoodieRecordIndexInfo(recordIndexRecord.get(RECORD_INDEX_FIELD_PARTITION).toString(),
             Long.parseLong(recordIndexRecord.get(RECORD_INDEX_FIELD_FILEID_HIGH_BITS).toString()),
@@ -271,15 +260,15 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
   }
 
   private HoodieMetadataPayload(String key, HoodieMetadataBloomFilter metadataBloomFilter) {
-    this(key, METADATA_TYPE_BLOOM_FILTER, null, metadataBloomFilter, null, null);
+    this(key, MetadataPartitionType.BLOOM_FILTERS.getId(""), null, metadataBloomFilter, null, null);
   }
 
   private HoodieMetadataPayload(String key, HoodieMetadataColumnStats columnStats) {
-    this(key, METADATA_TYPE_COLUMN_STATS, null, null, columnStats, null);
+    this(key, MetadataPartitionType.COLUMN_STATS.getId(""), null, null, columnStats, null);
   }
 
   private HoodieMetadataPayload(String key, HoodieRecordIndexInfo recordIndexMetadata) {
-    this(key, METADATA_TYPE_RECORD_INDEX, null, null, null, recordIndexMetadata);
+    this(key, MetadataPartitionType.RECORD_INDEX.getId(""), null, null, null, recordIndexMetadata);
   }
 
   protected HoodieMetadataPayload(String key, int type,
@@ -314,7 +303,7 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
     partitions.forEach(partition -> fileInfo.put(HoodieTableMetadataUtil.getPartitionIdentifierForFilesPartition(partition), new HoodieMetadataFileInfo(0L, isDeleted)));
 
     HoodieKey key = new HoodieKey(RECORDKEY_PARTITION_LIST, MetadataPartitionType.FILES.getPartitionPath());
-    HoodieMetadataPayload payload = new HoodieMetadataPayload(key.getRecordKey(), METADATA_TYPE_PARTITION_LIST,
+    HoodieMetadataPayload payload = new HoodieMetadataPayload(key.getRecordKey(), MetadataPartitionType.FILES.getId(RECORDKEY_PARTITION_LIST),
         fileInfo);
     return new HoodieAvroRecord<>(key, payload);
   }
@@ -337,7 +326,7 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
     filesDeleted.forEach(fileName -> fileInfo.put(fileName, DELETE_FILE_METADATA));
 
     HoodieKey key = new HoodieKey(partitionIdentifier, MetadataPartitionType.FILES.getPartitionPath());
-    HoodieMetadataPayload payload = new HoodieMetadataPayload(key.getRecordKey(), METADATA_TYPE_FILE_LIST, fileInfo);
+    HoodieMetadataPayload payload = new HoodieMetadataPayload(key.getRecordKey(), MetadataPartitionType.FILES.getId(""), fileInfo);
     return new HoodieAvroRecord<>(key, payload);
   }
 
@@ -386,26 +375,24 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
     checkArgument(previousRecord.key.equals(key),
         "Cannot combine " + previousRecord.key + " with " + key + " as the keys differ");
 
-    switch (type) {
-      case METADATA_TYPE_PARTITION_LIST:
-      case METADATA_TYPE_FILE_LIST:
-        Map<String, HoodieMetadataFileInfo> combinedFileInfo = combineFileSystemMetadata(previousRecord);
-        return new HoodieMetadataPayload(key, type, combinedFileInfo);
-      case METADATA_TYPE_BLOOM_FILTER:
-        HoodieMetadataBloomFilter combineBloomFilterMetadata = combineBloomFilterMetadata(previousRecord);
-        return new HoodieMetadataPayload(key, combineBloomFilterMetadata);
-      case METADATA_TYPE_COLUMN_STATS:
-        return new HoodieMetadataPayload(key, combineColumnStatsMetadata(previousRecord));
-      case METADATA_TYPE_RECORD_INDEX:
-        // There is always a single mapping and the latest mapping is maintained.
-        // Mappings in record index can change in two scenarios:
-        // 1. A key deleted from dataset and then added again (new filedID)
-        // 2. A key moved to a different file due to clustering
+    if (type == MetadataPartitionType.FILES.getId("") || type == MetadataPartitionType.FILES.getId(RECORDKEY_PARTITION_LIST)) {
+      Map<String, HoodieMetadataFileInfo> combinedFileInfo = combineFileSystemMetadata(previousRecord);
+      return new HoodieMetadataPayload(key, type, combinedFileInfo);
+    } else if (type == MetadataPartitionType.BLOOM_FILTERS.getId("")) {
+      HoodieMetadataBloomFilter combineBloomFilterMetadata = combineBloomFilterMetadata(previousRecord);
+      return new HoodieMetadataPayload(key, combineBloomFilterMetadata);
+    } else if (type == MetadataPartitionType.COLUMN_STATS.getId("")) {
+      return new HoodieMetadataPayload(key, combineColumnStatsMetadata(previousRecord));
+    } else if (type == MetadataPartitionType.RECORD_INDEX.getId("")) {
+      // There is always a single mapping and the latest mapping is maintained.
+      // Mappings in record index can change in two scenarios:
+      // 1. A key deleted from dataset and then added again (new filedID)
+      // 2. A key moved to a different file due to clustering
 
-        // No need to merge with previous record index, always pick the latest payload.
-        return this;
-      default:
-        throw new HoodieMetadataException("Unknown type of HoodieMetadataPayload: " + type);
+      // No need to merge with previous record index, always pick the latest payload.
+      return this;
+    } else {
+      throw new HoodieMetadataException("Unknown type of HoodieMetadataPayload: " + type);
     }
   }
 
@@ -836,45 +823,35 @@ public class HoodieMetadataPayload implements HoodieRecordPayload<HoodieMetadata
     sb.append(KEY_FIELD_NAME + "=").append(key).append(", ");
     sb.append(SCHEMA_FIELD_NAME_TYPE + "=").append(type).append(", ");
 
-    switch (type) {
-      case METADATA_TYPE_PARTITION_LIST:
-      case METADATA_TYPE_FILE_LIST:
-        sb.append("Files: {");
-        sb.append("creations=").append(Arrays.toString(getFilenames().toArray())).append(", ");
-        sb.append("deletions=").append(Arrays.toString(getDeletions().toArray())).append(", ");
-        sb.append("}");
-        break;
-      case METADATA_TYPE_BLOOM_FILTER:
-        checkState(getBloomFilterMetadata().isPresent());
-        sb.append("BloomFilter: {");
-        sb.append("bloom size: ").append(getBloomFilterMetadata().get().getBloomFilter().array().length).append(", ");
-        sb.append("timestamp: ").append(getBloomFilterMetadata().get().getTimestamp()).append(", ");
-        sb.append("deleted: ").append(getBloomFilterMetadata().get().getIsDeleted());
-        sb.append("}");
-        break;
-      case METADATA_TYPE_COLUMN_STATS:
-        checkState(getColumnStatMetadata().isPresent());
-        sb.append("ColStats: {");
-        sb.append(getColumnStatMetadata().get());
-        sb.append("}");
-        break;
-      case METADATA_TYPE_RECORD_INDEX:
-        sb.append("RecordIndex: {");
-        sb.append("location=").append(getRecordGlobalLocation());
-        sb.append("}");
-        break;
-      default:
-        break;
+    if (type == MetadataPartitionType.FILES.getId("") || type == MetadataPartitionType.FILES.getId(RECORDKEY_PARTITION_LIST)) {
+      sb.append("Files: {");
+      sb.append("creations=").append(Arrays.toString(getFilenames().toArray())).append(", ");
+      sb.append("deletions=").append(Arrays.toString(getDeletions().toArray())).append(", ");
+      sb.append("}");
+    } else if (type == MetadataPartitionType.BLOOM_FILTERS.getId("")) {
+      checkState(getBloomFilterMetadata().isPresent());
+      sb.append("BloomFilter: {");
+      sb.append("bloom size: ").append(getBloomFilterMetadata().get().getBloomFilter().array().length).append(", ");
+      sb.append("timestamp: ").append(getBloomFilterMetadata().get().getTimestamp()).append(", ");
+      sb.append("deleted: ").append(getBloomFilterMetadata().get().getIsDeleted());
+      sb.append("}");
+    } else if (type == MetadataPartitionType.COLUMN_STATS.getId("")) {
+      checkState(getColumnStatMetadata().isPresent());
+      sb.append("ColStats: {");
+      sb.append(getColumnStatMetadata().get());
+      sb.append("}");
+    } else if (type == MetadataPartitionType.RECORD_INDEX.getId("")) {
+      sb.append("RecordIndex: {");
+      sb.append("location=").append(getRecordGlobalLocation());
+      sb.append("}");
     }
     sb.append('}');
     return sb.toString();
   }
 
   private static void validatePayload(int type, Map<String, HoodieMetadataFileInfo> filesystemMetadata) {
-    if (type == METADATA_TYPE_FILE_LIST) {
-      filesystemMetadata.forEach((fileName, fileInfo) -> {
-        checkState(fileInfo.getIsDeleted() || fileInfo.getSize() > 0, "Existing files should have size > 0");
-      });
+    if (type == MetadataPartitionType.FILES.getId("")) {
+      filesystemMetadata.forEach((fileName, fileInfo) -> checkState(fileInfo.getIsDeleted() || fileInfo.getSize() > 0, "Existing files should have size > 0"));
     }
   }
 
