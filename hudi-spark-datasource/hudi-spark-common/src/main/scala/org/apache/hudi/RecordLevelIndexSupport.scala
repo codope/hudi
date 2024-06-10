@@ -150,7 +150,7 @@ object RecordLevelIndexSupport {
   def getPrunedStoragePaths(prunedPartitionsAndFileSlices: Seq[(Option[BaseHoodieTableFileIndex.PartitionPath], Seq[FileSlice])],
                             fileIndex: HoodieFileIndex): Seq[StoragePath] = {
     if (prunedPartitionsAndFileSlices.isEmpty) {
-      return fileIndex.inputFiles.map(strPath => new StoragePath(strPath)).toSeq
+      fileIndex.inputFiles.map(strPath => new StoragePath(strPath)).toSeq
     }
     prunedPartitionsAndFileSlices
       .flatMap { case (_, fileSlices) =>
