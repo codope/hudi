@@ -58,6 +58,26 @@ class TestRecordLevelIndexWithSQL extends RecordLevelIndexTestBase {
     verifyNegativeTestCases(hudiOpts)
   }
 
+  @Test
+  def testRLIWithPartitionFilter(): Unit = {
+    var hudiOpts = commonOpts
+    hudiOpts = hudiOpts + (
+      DataSourceWriteOptions.TABLE_TYPE.key -> "MERGE_ON_READ",
+      DataSourceReadOptions.ENABLE_DATA_SKIPPING.key -> "true")
+
+    doWriteAndValidateDataAndRecordIndex(hudiOpts,
+      operation = DataSourceWriteOptions.INSERT_OPERATION_OPT_VAL,
+      saveMode = SaveMode.Overwrite,
+      validate = false)
+    doWriteAndValidateDataAndRecordIndex(hudiOpts,
+      operation = DataSourceWriteOptions.UPSERT_OPERATION_OPT_VAL,
+      saveMode = SaveMode.Append,
+      validate = false)
+
+    createTempTable(hudiOpts)
+    verifyEqualToQueryWithPartitionFilter(hudiOpts)
+  }
+
   private def verifyNegativeTestCases(hudiOpts: Map[String, String]): Unit = {
     val commonOpts = hudiOpts + ("path" -> basePath)
     metaClient = HoodieTableMetaClient.reload(metaClient)
@@ -92,7 +112,17 @@ class TestRecordLevelIndexWithSQL extends RecordLevelIndexTestBase {
     val reckey = mergedDfList.last.limit(1).collect().map(row => row.getAs("_row_key").toString)
     val dataFilter = EqualTo(attribute("_row_key"), Literal(reckey(0)))
     assertEquals(1, spark.sql("select * from " + sqlTempTable + " where " + dataFilter.sql).count())
-    verifyPruningFileCount(hudiOpts, dataFilter, 1)
+    verifyPruningFileCount(hudiOpts, Seq(), dataFilter, 1)
+  }
+
+  def verifyEqualToQueryWithPartitionFilter(hudiOpts: Map[String, String]): Unit = {
+    val lastRow = mergedDfList.last.limit(1).collect()
+    val reckey = lastRow.map(row => row.getAs("_row_key").toString)
+    val dataFilter = EqualTo(attribute("_row_key"), Literal(reckey(0)))
+    val partitionKey = lastRow.map(row => row.getAs("partition").toString)
+    val partitionFilter = EqualTo(attribute("partition"), Literal(partitionKey(0)))
+    assertEquals(1, spark.sql("select * from " + sqlTempTable + " where " + dataFilter.sql + " and " + partitionFilter.sql).count())
+    verifyPruningFileCount(hudiOpts, Seq(partitionFilter), dataFilter, 1)
   }
 
   def verifyInQuery(hudiOpts: Map[String, String]): Unit = {
@@ -100,13 +130,13 @@ class TestRecordLevelIndexWithSQL extends RecordLevelIndexTestBase {
     var dataFilter = In(attribute("_row_key"), reckey.map(l => literal(l)).toList)
     assertEquals(1, spark.sql("select * from " + sqlTempTable + " where " + dataFilter.sql).count())
     var numFiles = if (isTableMOR()) 2 else 1
-    verifyPruningFileCount(hudiOpts, dataFilter, numFiles)
+    verifyPruningFileCount(hudiOpts, Seq(), dataFilter, numFiles)
 
     reckey = mergedDfList.last.limit(2).collect().map(row => row.getAs("_row_key").toString)
     dataFilter = In(attribute("_row_key"), reckey.map(l => literal(l)).toList)
     assertEquals(2, spark.sql("select * from " + sqlTempTable + " where " + dataFilter.sql).count())
     numFiles = if (isTableMOR()) 2 else 2
-    verifyPruningFileCount(hudiOpts, dataFilter, numFiles)
+    verifyPruningFileCount(hudiOpts, Seq(), dataFilter, numFiles)
   }
 
   private def attribute(partition: String): AttributeReference = {
@@ -117,12 +147,15 @@ class TestRecordLevelIndexWithSQL extends RecordLevelIndexTestBase {
     Literal.create(value)
   }
 
-  private def verifyPruningFileCount(opts: Map[String, String], dataFilter: Expression, numFiles: Int): Unit = {
+  private def verifyPruningFileCount(opts: Map[String, String],
+                                     partitionFilters: Seq[Expression],
+                                     dataFilter: Expression,
+                                     numFiles: Int): Unit = {
     // with data skipping
     val commonOpts = opts + ("path" -> basePath)
     metaClient = HoodieTableMetaClient.reload(metaClient)
     var fileIndex = HoodieFileIndex(spark, metaClient, None, commonOpts, includeLogFiles = true)
-    val filteredPartitionDirectories = fileIndex.listFiles(Seq(), Seq(dataFilter))
+    val filteredPartitionDirectories = fileIndex.listFiles(partitionFilters, Seq(dataFilter))
     val filteredFilesCount = filteredPartitionDirectories.flatMap(s => s.files).size
     assertTrue(filteredFilesCount < getLatestDataFilesCount(opts))
     assertEquals(filteredFilesCount, numFiles)
