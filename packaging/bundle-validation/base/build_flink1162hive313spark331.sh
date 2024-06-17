@@ -17,10 +17,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-docker build \
+docker build --load \
  --build-arg HIVE_VERSION=3.1.3 \
  --build-arg FLINK_VERSION=1.16.2 \
  --build-arg SPARK_VERSION=3.3.1 \
  --build-arg SPARK_HADOOP_VERSION=2 \
  -t hudi-ci-bundle-validation-base:flink1162hive313spark331 .
 docker image tag hudi-ci-bundle-validation-base:flink1162hive313spark331 apachehudi/hudi-ci-bundle-validation-base:flink1162hive313spark331
+docker push apachehudi/hudi-ci-bundle-validation-base:flink1162hive313spark331
