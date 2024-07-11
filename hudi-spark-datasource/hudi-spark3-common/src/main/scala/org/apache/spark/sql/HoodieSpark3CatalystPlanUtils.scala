@@ -48,7 +48,7 @@ trait HoodieSpark3CatalystPlanUtils extends HoodieCatalystPlansUtils {
                            query: LogicalPlan,
                            byName: Boolean,
                            conf: SQLConf): LogicalPlan =
-    TableOutputResolver.resolveOutputColumns(tableName, expected, query, byName, conf)
+    HoodieTableOutputResolver.resolveOutputColumns(tableName, expected, query, byName, conf)
 
   override def createExplainCommand(plan: LogicalPlan, extended: Boolean): LogicalPlan =
     ExplainCommand(plan, mode = if (extended) ExtendedMode else SimpleMode)

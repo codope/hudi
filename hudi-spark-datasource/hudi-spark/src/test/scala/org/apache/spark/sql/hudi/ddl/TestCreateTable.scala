@@ -1463,4 +1463,38 @@ class TestCreateTable extends HoodieSparkSqlTestBase {
       }
     }
   }
+
+  test("Test Create Hoodie Table With Multiple Partitions") {
+    withTempDir { tmp =>
+      val tableName = generateTableName
+      val tablePath = s"${tmp.getCanonicalPath}"
+      spark.sql(
+        s"""
+           | create table $tableName (
+           |    ts BIGINT,
+           |    id STRING,
+           |    rider STRING,
+           |    driver STRING,
+           |    fare DOUBLE,
+           |    city STRING,
+           |    state STRING
+           |) using hudi
+           | options(
+           |    primaryKey ='id'
+           |)
+           |PARTITIONED BY (state, city)
+           |location '$tablePath';
+       """.stripMargin)
+      spark.sql(s"insert into $tableName values(1695159649,'trip1','rider-A','driver-K',19.10,'san_francisco','california')")
+      spark.sql(s"insert into $tableName values(1695332066,'trip3','rider-E','driver-O',93.50,'austin','texas')")
+
+      val table = spark.sessionState.catalog.getTableMetadata(TableIdentifier(tableName))
+      checkAnswer(s"select ts, id, rider, driver, fare, city, state from $tableName")(
+        //Seq(1695159649, "trip1", "rider-A", "driver-K", 19.10, "san_francisco", "california"),
+        Seq(1695332066, "trip3", "rider-E", "driver-O", 93.50, "austin", "texas")
+      )
+      assertResult(table.properties("type"))("cow")
+      assertResult(table.properties("primaryKey"))("id")
+    }
+  }
 }

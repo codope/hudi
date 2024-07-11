@@ -21,12 +21,13 @@ import org.apache.hudi.common.util.{ReflectionUtils, ValidationUtils}
 import org.apache.hudi.common.util.ReflectionUtils.loadClass
 import org.apache.hudi.{HoodieSparkUtils, SparkAdapterSupport}
 import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.analysis.{TableOutputResolver, UnresolvedAttribute}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSeq, Expression, GenericInternalRow}
 import org.apache.spark.sql.catalyst.optimizer.ReplaceExpressions
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.command._
 import org.apache.spark.sql.execution.datasources.{CreateTable, LogicalRelation}
 import org.apache.spark.sql.hudi.HoodieSqlCommonUtils.{isMetaField, removeMetaFields}
@@ -250,6 +251,7 @@ object HoodieAnalysis extends SparkAdapterSupport {
 
           // NOTE: In case of [[InsertIntoStatement]] Hudi tables could be on both sides -- receiving and providing
           //       the data, as such we have to make sure that we handle both of these cases
+          // INSERT INTO RESOLUTION
           case iis @ MatchInsertIntoStatement(targetTable, _, _, query, _, _) =>
             val updatedTargetTable = targetTable match {
               // In the receiving side of the IIS, we can't project meta-field attributes out,
@@ -413,6 +415,16 @@ case class ResolveImplementationsEarly() extends Rule[LogicalPlan] {
           //       we need to check whether we could proceed here, or has to wait until fallback rule kicks in
           case lr: LogicalRelation =>
             // Create a project if this is an INSERT INTO query with specified cols.
+            preprocess(iis, lr.catalogTable.get.identifier.table, lr.catalogTable) match {
+              case iis: InsertIntoStatement =>
+                val projectByUserSpecified = if (userSpecifiedCols.nonEmpty) {
+                  sparkAdapter.getCatalystPlanUtils.createProjectForByNameQuery(lr, iis)
+                } else {
+                  None
+                }
+                new InsertIntoHoodieTableCommand(lr, projectByUserSpecified.getOrElse(query), partition, overwrite)
+              case _ => iis
+            }
             val projectByUserSpecified = if (userSpecifiedCols.nonEmpty) {
               ValidationUtils.checkState(lr.catalogTable.isDefined, "Missing catalog table")
               sparkAdapter.getCatalystPlanUtils.createProjectForByNameQuery(lr, iis)
@@ -429,6 +441,48 @@ case class ResolveImplementationsEarly() extends Rule[LogicalPlan] {
         CreateHoodieTableAsSelectCommand(table, mode, query)
 
       case _ => plan
+    }
+  }
+
+  private def preprocess(insert: InsertIntoStatement,
+                         tblName: String,
+                         catalogTable: Option[CatalogTable]): InsertIntoStatement = {
+
+    val normalizedPartSpec = insert.partitionSpec
+
+    val staticPartCols = normalizedPartSpec.filter(_._2.isDefined).keySet
+    val expectedColumns = insert.table.output.filterNot(a => staticPartCols.contains(a.name))
+
+    if (expectedColumns.length != insert.query.schema.length) {
+      throw QueryCompilationErrors.mismatchedInsertedDataColumnNumberError(
+        catalogTable.get.qualifiedName, insert, staticPartCols)
+    }
+
+    val partitionsTrackedByCatalog = catalogTable.isDefined &&
+      catalogTable.get.partitionColumnNames.nonEmpty &&
+      catalogTable.get.tracksPartitionsInCatalog
+    if (partitionsTrackedByCatalog && normalizedPartSpec.nonEmpty) {
+      // empty partition column value
+      if (normalizedPartSpec.values.flatten.exists(v => v != null && v.isEmpty)) {
+        val spec = normalizedPartSpec.map(p => p._1 + "=" + p._2).mkString("[", ", ", "]")
+        throw QueryCompilationErrors.invalidPartitionSpecError(
+          s"The spec ($spec) contains an empty partition column value")
+      }
+    }
+
+    val newQuery = TableOutputResolver.resolveOutputColumns(
+      tblName, expectedColumns, insert.query, byName = false, insert.conf)
+    if (normalizedPartSpec.nonEmpty) {
+      //      if (normalizedPartSpec.size != partColNames.length) {
+      //        throw QueryCompilationErrors.requestedPartitionsMismatchTablePartitionsError(
+      //          tblName, normalizedPartSpec, partColNames)
+      //      }
+
+      insert.copy(query = newQuery, partitionSpec = normalizedPartSpec)
+    } else {
+      // All partition columns are dynamic because the InsertIntoTable command does
+      // not explicitly specify partitioning columns.
+      insert.copy(query = newQuery, partitionSpec = normalizedPartSpec)
     }
   }
 }
