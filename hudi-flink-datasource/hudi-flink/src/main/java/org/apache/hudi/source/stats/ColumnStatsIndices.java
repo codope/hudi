@@ -64,7 +64,7 @@ import static org.apache.hudi.common.util.ValidationUtils.checkState;
  * providing convenient interfaces to read it, transpose, etc.
  */
 public class ColumnStatsIndices {
-  private static final DataType METADATA_DATA_TYPE = getMetadataDataType();
+  static final DataType METADATA_DATA_TYPE = getMetadataDataType();
   private static final DataType COL_STATS_DATA_TYPE = getColStatsDataType();
   private static final int[] COL_STATS_TARGET_POS = getColStatsTargetPos();
 
