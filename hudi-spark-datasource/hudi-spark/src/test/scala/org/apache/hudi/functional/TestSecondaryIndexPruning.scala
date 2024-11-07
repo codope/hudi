@@ -947,6 +947,7 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
       // do another insert and validate compaction in metadata table
 
       spark.sql(s"delete from $tableName where record_key_col = 'row2'")
+      // "dummy", "row2", false
       //spark.sql(s"update $tableName set not_record_key_col = 'xyz1' where record_key_col = 'row3'")
       //spark.sql(s"update $tableName set not_record_key_col = 'xyz' where record_key_col = 'row3'")
       //spark.sql(s"update $tableName set not_record_key_col = 'xyz2' where record_key_col = 'row3'")*/
@@ -1039,7 +1040,7 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
       spark.sql(s"update $tableName set not_record_key_col = 'xyz1' where record_key_col = 'row3'")
       spark.sql(s"update $tableName set not_record_key_col = 'xyz' where record_key_col = 'row2'")
 
-      spark.sql(s"delete from $tableName where record_key_col = 'row2'")
+      //spark.sql(s"delete from $tableName where record_key_col = 'row2'")
 
       val metadataTableFSView = HoodieSparkTable.create(getWriteConfig(hudiOpts), context()).getMetadataTable.asInstanceOf[HoodieBackedTableMetadata].getMetadataFileSystemView
       try {
@@ -1067,7 +1068,8 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
       spark.sql("set hoodie.metadata.enable=true")
       spark.sql("set hoodie.enable.data.skipping=true")
       spark.sql("set hoodie.fileIndex.dataSkippingFailureMode=strict")
-      checkAnswer(s"select ts, record_key_col, not_record_key_col, partition_key_col from $tableName where not_record_key_col in ('xyz','xyz1')")(
+      checkAnswer(s"select ts, record_key_col, not_record_key_col, partition_key_col from $tableName where not_record_key_col in ('xyz','xyz1','def')")(
+        Seq(2, "row2", "xyz", "p1"),
         Seq(3, "row3", "xyz1", "p1")
       )
       checkAnswer(s"select ts, record_key_col, not_record_key_col, partition_key_col from $tableName where not_record_key_col in ('abc')")(
@@ -1112,7 +1114,7 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
       spark.sql("set hoodie.parquet.small.file.limit=0")
       spark.sql(s"insert into $tableName values(1, 'row1', 'abc', 'p1')")
       spark.sql(s"insert into $tableName values(2, 'row2', 'abc', 'p2')")
-      spark.sql(s"insert into $tableName values(3, 'row3', 'hjk', 'p2')")
+      spark.sql(s"insert into $tableName values(3, 'row3', 'abc', 'p2')")
       // create secondary index
       spark.sql(s"create index idx_not_record_key_col on $tableName using secondary_index(not_record_key_col)")
       // validate index created successfully
@@ -1125,11 +1127,11 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
       checkAnswer(s"select key, SecondaryIndexMetadata.recordKey, SecondaryIndexMetadata.isDeleted from hudi_metadata('$basePath') where type=7")(
         Seq("abc", "row1", false),
         Seq("abc", "row2", false),
-        Seq("hjk","row3",false)
+        Seq("abc","row3",false)
       )
 
       // do another insert and validate compaction in metadata table
-      spark.sql(s"update $tableName set not_record_key_col = 'def' where record_key_col = 'row1'")
+      spark.sql(s"update $tableName set not_record_key_col = 'def' where record_key_col in ('row1','row2')")
       spark.sql(s"update $tableName set not_record_key_col = 'abc' where record_key_col = 'row3'")
       spark.sql(s"update $tableName set not_record_key_col = 'poc' where record_key_col = 'row2'")
       // spark.sql(s"update $tableName set not_record_key_col = 'xyz2' where record_key_col = 'row3'")
