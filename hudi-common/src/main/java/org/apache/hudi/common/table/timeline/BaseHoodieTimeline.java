@@ -18,12 +18,15 @@
 
 package org.apache.hudi.common.table.timeline;
 
+import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.timeline.HoodieInstant.State;
 import org.apache.hudi.common.util.CollectionUtils;
+import org.apache.hudi.common.util.FileIOUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.common.util.ValidationUtils;
 import org.apache.hudi.exception.HoodieException;
+import org.apache.hudi.storage.StoragePath;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -656,4 +659,17 @@ public abstract class BaseHoodieTimeline implements HoodieTimeline {
     }
     return merged;
   }
+
+  /*public void createFileInMetaPath(String filename, Option<byte[]> content, boolean allowOverwrite, HoodieTableMetaClient metaClient) {
+    StoragePath fullPath = getInstantFileNamePath(filename, metaClient);
+    if (allowOverwrite || metaClient.getTimelineLayoutVersion().isNullVersion()) {
+      FileIOUtils.createFileInPath(metaClient.getStorage(), fullPath, content);
+    } else {
+      metaClient.getStorage().createImmutableFileInPath(fullPath, content);
+    }
+  }
+
+  public StoragePath getInstantFileNamePath(String fileName, HoodieTableMetaClient metaClient) {
+    return new StoragePath(fileName.contains(SCHEMA_COMMIT_ACTION) ? metaClient.getSchemaFolderName() : metaClient.getMetaPath().toString(), fileName);
+  }*/
 }
