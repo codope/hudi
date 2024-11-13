@@ -258,7 +258,7 @@ public class TestHoodieTableConfig extends HoodieCommonTestHarness {
 
   @Test
   public void testValidateConfigVersion() {
-    assertTrue(HoodieTableConfig.validateConfigVersion(HoodieTableConfig.INITIAL_VERSION, HoodieTableVersion.EIGHT));
+    assertTrue(HoodieTableConfig.validateConfigVersion(HoodieTableConfig.INITIAL_VERSION, HoodieTableVersion.SEVEN));
     assertTrue(HoodieTableConfig.validateConfigVersion(ConfigProperty.key("").noDefaultValue().withDocumentation(""),
         HoodieTableVersion.SIX));
     assertFalse(HoodieTableConfig.validateConfigVersion(HoodieTableConfig.INITIAL_VERSION, HoodieTableVersion.SIX));
@@ -269,7 +269,7 @@ public class TestHoodieTableConfig extends HoodieCommonTestHarness {
     // test invalid configs are dropped
     HoodieConfig config = new HoodieConfig();
     config.setValue(HoodieTableConfig.VERSION, String.valueOf(HoodieTableVersion.SIX.versionCode()));
-    config.setValue(HoodieTableConfig.INITIAL_VERSION, String.valueOf(HoodieTableVersion.EIGHT.versionCode()));
+    config.setValue(HoodieTableConfig.INITIAL_VERSION, String.valueOf(HoodieTableVersion.SEVEN.versionCode()));
     config.setValue(RECORD_MERGE_MODE, RECORD_MERGE_MODE.defaultValue().name());
 
     HoodieTableConfig.dropInvalidConfigs(config);
@@ -279,7 +279,7 @@ public class TestHoodieTableConfig extends HoodieCommonTestHarness {
 
     // test valid ones are not dropped
     config = new HoodieConfig();
-    config.setValue(HoodieTableConfig.VERSION, String.valueOf(HoodieTableVersion.EIGHT.versionCode()));
+    config.setValue(HoodieTableConfig.VERSION, String.valueOf(HoodieTableVersion.SEVEN.versionCode()));
     config.setValue(RECORD_MERGE_MODE, RECORD_MERGE_MODE.defaultValue().name());
     HoodieTableConfig.dropInvalidConfigs(config);
     assertTrue(config.contains(RECORD_MERGE_MODE));

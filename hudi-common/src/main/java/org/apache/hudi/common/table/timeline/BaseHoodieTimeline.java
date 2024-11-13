@@ -656,4 +656,17 @@ public abstract class BaseHoodieTimeline implements HoodieTimeline {
     }
     return merged;
   }
+
+  /*public void createFileInMetaPath(String filename, Option<byte[]> content, boolean allowOverwrite, HoodieTableMetaClient metaClient) {
+    StoragePath fullPath = getInstantFileNamePath(filename, metaClient);
+    if (allowOverwrite || metaClient.getTimelineLayoutVersion().isNullVersion()) {
+      FileIOUtils.createFileInPath(metaClient.getStorage(), fullPath, content);
+    } else {
+      metaClient.getStorage().createImmutableFileInPath(fullPath, content);
+    }
+  }
+
+  public StoragePath getInstantFileNamePath(String fileName, HoodieTableMetaClient metaClient) {
+    return new StoragePath(fileName.contains(SCHEMA_COMMIT_ACTION) ? metaClient.getSchemaFolderName() : metaClient.getMetaPath().toString(), fileName);
+  }*/
 }

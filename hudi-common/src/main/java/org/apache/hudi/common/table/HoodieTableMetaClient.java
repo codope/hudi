@@ -406,7 +406,7 @@ public class HoodieTableMetaClient implements Serializable {
   }
 
   public HoodieStorage getStorage(StoragePath storagePath) {
-    return getStorage(metaPath, getStorageConf(), consistencyGuardConfig, fileSystemRetryConfig);
+    return getStorage(storagePath, getStorageConf(), consistencyGuardConfig, fileSystemRetryConfig);
   }
 
   private static HoodieStorage getStorage(StoragePath path,
@@ -467,6 +467,16 @@ public class HoodieTableMetaClient implements Serializable {
   public synchronized void reloadTableConfig() {
     this.tableConfig = new HoodieTableConfig(this.storage, metaPath,
         this.tableConfig.getRecordMergeMode(), this.tableConfig.getKeyGeneratorClassName(), this.tableConfig.getRecordMergeStrategyId());
+    reloadTimelineLayout();
+  }
+
+  /**
+   * Reload the timeline layout info.
+   */
+  private void reloadTimelineLayout() {
+    this.timelineLayoutVersion = tableConfig.getTimelineLayoutVersion().get();
+    this.timelineLayout = TimelineLayout.fromVersion(timelineLayoutVersion);
+    this.timelinePath = timelineLayout.getTimelinePath(this.basePath);
   }
 
   /**
@@ -557,9 +567,9 @@ public class HoodieTableMetaClient implements Serializable {
         : timelineLayout.getTimelineFactory().createArchivedTimeline(this, startTs);
   }
 
-  private static void createTableLayoutOnStorage(StorageConfiguration<?> storageConf,
+  public static void createTableLayoutOnStorage(StorageConfiguration<?> storageConf,
                                                  StoragePath basePath,
-                                                 Properties props) throws IOException {
+                                                 Properties props, Integer timelineLayout, boolean shouldCreateTableConfig) throws IOException {
     LOG.info("Initializing {} as hoodie table", basePath);
     final HoodieStorage storage = HoodieStorageUtils.getStorage(basePath, storageConf);
     if (!storage.exists(basePath)) {
@@ -570,9 +580,12 @@ public class HoodieTableMetaClient implements Serializable {
       storage.createDirectory(metaPathDir);
     }
     //Create Timeline Folder
-    StoragePath timelinePathDir = new StoragePath(metaPathDir, TIMELINEFOLDER_NAME);
-    if (!storage.exists(timelinePathDir)) {
-      storage.createDirectory(timelinePathDir);
+    timelineLayout = timelineLayout == null ? TimelineLayoutVersion.CURR_VERSION : timelineLayout;
+    if (TimelineLayoutVersion.VERSION_2.equals(timelineLayout)) {
+      StoragePath timelinePathDir = new StoragePath(metaPathDir, TIMELINEFOLDER_NAME);
+      if (!storage.exists(timelinePathDir)) {
+        storage.createDirectory(timelinePathDir);
+      }
     }
     // create schema folder
     StoragePath schemaPathDir = new StoragePath(metaPathDir, SCHEMA_FOLDER_NAME);
@@ -602,7 +615,9 @@ public class HoodieTableMetaClient implements Serializable {
     }
 
     initializeBootstrapDirsIfNotExists(basePath, storage);
-    HoodieTableConfig.create(storage, metaPathDir, props);
+    if (shouldCreateTableConfig) {
+      HoodieTableConfig.create(storage, metaPathDir, props);
+    }
   }
 
   public static void initializeBootstrapDirsIfNotExists(StoragePath basePath, HoodieStorage storage) throws IOException {
@@ -1412,7 +1427,7 @@ public class HoodieTableMetaClient implements Serializable {
 
     public HoodieTableMetaClient initTable(StorageConfiguration<?> storageConf, StoragePath basePath) throws IOException {
       Properties props = build();
-      createTableLayoutOnStorage(storageConf, basePath, props);
+      createTableLayoutOnStorage(storageConf, basePath, props, timelineLayoutVersion, true);
       HoodieTableMetaClient metaClient = HoodieTableMetaClient.builder().setConf(storageConf).setBasePath(basePath)
           .setMetaserverConfig(props)
           .build();

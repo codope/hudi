@@ -151,7 +151,6 @@ public class UpgradeDowngrade {
       }
     }
     // Reload the meta client to get the latest table config (which could have been updated due to metadata table)
-    metaClient = HoodieTableMetaClient.reload(metaClient);
     // Write out the current version in hoodie.properties.updated file
     for (Map.Entry<ConfigProperty, String> entry : tableProps.entrySet()) {
       metaClient.getTableConfig().setValue(entry.getKey(), entry.getValue());
@@ -195,8 +194,6 @@ public class UpgradeDowngrade {
       return new FourToThreeDowngradeHandler().downgrade(config, context, instantTime, upgradeDowngradeHelper);
     } else if (fromVersion == HoodieTableVersion.FIVE && toVersion == HoodieTableVersion.FOUR) {
       return new FiveToFourDowngradeHandler().downgrade(config, context, instantTime, upgradeDowngradeHelper);
-    } else if (fromVersion == HoodieTableVersion.SIX && toVersion == HoodieTableVersion.FIVE) {
-      return new SixToFiveDowngradeHandler().downgrade(config, context, instantTime, upgradeDowngradeHelper);
     } else if (fromVersion == HoodieTableVersion.SEVEN && toVersion == HoodieTableVersion.SIX) {
       return new SevenToSixDowngradeHandler().downgrade(config, context, instantTime, upgradeDowngradeHelper);
     } else if (fromVersion == HoodieTableVersion.EIGHT && toVersion == HoodieTableVersion.SEVEN) {
