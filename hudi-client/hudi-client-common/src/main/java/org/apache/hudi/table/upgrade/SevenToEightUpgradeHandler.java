@@ -30,14 +30,21 @@ import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.InstantFileNameGenerator;
 import org.apache.hudi.common.table.timeline.versioning.v1.ActiveTimelineV1;
 import org.apache.hudi.common.table.timeline.versioning.v1.CommitMetadataSerDeV1;
+import org.apache.hudi.common.table.timeline.versioning.v2.ActiveTimelineV2;
 import org.apache.hudi.common.table.timeline.versioning.v2.CommitMetadataSerDeV2;
 import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.common.util.collection.Triple;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.exception.HoodieIOException;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.keygen.constant.KeyGeneratorType;
 import org.apache.hudi.table.HoodieTable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +58,8 @@ import static org.apache.hudi.table.upgrade.UpgradeDowngradeUtils.upgradeToLSMTi
  * Version 8 is the placeholder version to track 1.x.
  */
 public class SevenToEightUpgradeHandler implements UpgradeHandler {
+
+  private static final Logger LOG = LoggerFactory.getLogger(SevenToEightUpgradeHandler.class);
 
   @Override
   public Map<ConfigProperty, String> upgrade(HoodieWriteConfig config, HoodieEngineContext context,
@@ -73,15 +82,23 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     // Handle timeline upgrade:
     //  - rename instants in active timeline to new format
     //  - convert archived timeline to new LSM timeline format
-    List<HoodieInstant> instants = metaClient.getActiveTimeline().getInstants();
+    List<HoodieInstant> instants = new ArrayList<>();
+    try {
+      // We need to move all the instants - not just completed ones.
+      instants = metaClient.scanHoodieInstantsFromFileSystem(metaClient.getTimelinePath(),
+          ActiveTimelineV1.VALID_EXTENSIONS_IN_ACTIVE_TIMELINE, false);
+    } catch (IOException ioe) {
+      LOG.error("Failed to get instants from filesystem", ioe);
+      throw new HoodieIOException("Failed to get instants from filesystem", ioe);
+    }
     if (!instants.isEmpty()) {
       InstantFileNameGenerator instantFileNameGenerator = metaClient.getInstantFileNameGenerator();
       CommitMetadataSerDeV2 commitMetadataSerDeV2 = new CommitMetadataSerDeV2();
       CommitMetadataSerDeV1 commitMetadataSerDeV1 = new CommitMetadataSerDeV1();
-      ActiveTimelineV1 activeTimelineV1 = new ActiveTimelineV1(metaClient);
+      ActiveTimelineV2 activeTimelineV2 = new ActiveTimelineV2(metaClient);
       context.map(instants, instant -> {
         String fileName = instantFileNameGenerator.getFileName(instant);
-        return upgradeActiveTimelineInstant(instant, metaClient, fileName, commitMetadataSerDeV2, commitMetadataSerDeV1, activeTimelineV1);
+        return upgradeActiveTimelineInstant(instant, metaClient, fileName, commitMetadataSerDeV2, commitMetadataSerDeV1, activeTimelineV2);
       }, instants.size());
     }
     upgradeToLSMTimeline(table, context, config);

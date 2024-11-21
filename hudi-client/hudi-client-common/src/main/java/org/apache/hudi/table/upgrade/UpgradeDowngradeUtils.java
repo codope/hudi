@@ -29,7 +29,6 @@ import org.apache.hudi.common.model.HoodieTableType;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
-import org.apache.hudi.common.table.timeline.CommitMetadataSerDe;
 import org.apache.hudi.common.table.timeline.HoodieArchivedTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieInstantTimeGenerator;
@@ -39,6 +38,7 @@ import org.apache.hudi.common.table.timeline.TimelineFactory;
 import org.apache.hudi.common.table.timeline.versioning.TimelineLayoutVersion;
 import org.apache.hudi.common.table.timeline.versioning.v1.ActiveTimelineV1;
 import org.apache.hudi.common.table.timeline.versioning.v1.CommitMetadataSerDeV1;
+import org.apache.hudi.common.table.timeline.versioning.v2.ActiveTimelineV2;
 import org.apache.hudi.common.table.timeline.versioning.v2.CommitMetadataSerDeV2;
 import org.apache.hudi.common.util.CollectionUtils;
 import org.apache.hudi.common.util.FileIOUtils;
@@ -65,7 +65,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
-import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.apache.hudi.common.table.timeline.HoodieInstant.UNDERSCORE;
@@ -78,8 +77,6 @@ public class UpgradeDowngradeUtils {
 
   private static final Logger LOG = LoggerFactory.getLogger(UpgradeDowngradeUtils.class);
 
-  static final String SIX_TO_EIGHT_TMP_FILE_PREFIX = "temp_commit_file_for_six_to_eight_upgrade_";
-  static final String EIGHT_TO_SIX_TMP_FILE_PREFIX = "temp_commit_file_for_eight_to_six_downgrade_";
   // Map of actions that were renamed in table version 8, to their original names in table version 6
   static final Map<String, String> EIGHT_TO_SIX_TIMELINE_ACTION_MAP = CollectionUtils.createImmutableMap(
       Pair.of(CLUSTERING_ACTION, REPLACE_COMMIT_ACTION)
@@ -257,61 +254,49 @@ public class UpgradeDowngradeUtils {
       replacedFileName = replacedFileName.replace(instant.getAction(), EIGHT_TO_SIX_TIMELINE_ACTION_MAP.get(instant.getAction()));
     }
     try {
-      return renameInstantFile(instant, metaClient, originalFileName, replacedFileName, commitMetadataSerDeV2, commitMetadataSerDeV1, EIGHT_TO_SIX_TMP_FILE_PREFIX, activeTimelineV1);
+      return renameTimelineV2InstantFileToV1Format(instant, metaClient, originalFileName, replacedFileName, commitMetadataSerDeV2, commitMetadataSerDeV1, activeTimelineV1);
     } catch (IOException e) {
       LOG.error("Can not to complete the downgrade from version eight to version seven. The reason for failure is {}", e.getMessage());
       throw new HoodieException(e);
     }
   }
 
-  static boolean downgradeActiveTimelineInstant2(HoodieInstant instant, HoodieTableMetaClient metaClient, String fileName,
-                                                 CommitMetadataSerDeV2 commitMetadataSerDeV2, CommitMetadataSerDeV1 commitMetadataSerDeV1,
-                                                 ActiveTimelineV1 activeTimelineV1) throws IOException {
-    // Rename the metadata file name from the ${instant_time}_${completion_time}.action[.state] format in version 1.x to the ${instant_time}.action[.state] format in version 0.x.
-    StoragePath fromPath = new StoragePath(TIMELINE_LAYOUT_V2.getTimelinePath(metaClient.getBasePath()), fileName);
+  private static boolean renameTimelineV2InstantFileToV1Format(HoodieInstant instant, HoodieTableMetaClient metaClient, String originalFileName, String replacedFileName,
+                                                               CommitMetadataSerDeV2 commitMetadataSerDeV2, CommitMetadataSerDeV1 commitMetadataSerDeV1, ActiveTimelineV1 activeTimelineV1)
+      throws IOException {
+    StoragePath fromPath = new StoragePath(TIMELINE_LAYOUT_V2.getTimelinePath(metaClient.getBasePath()), originalFileName);
     long modificationTime = instant.isCompleted() ? convertCompletionTimeToEpoch(instant) : -1;
-    StoragePath toPath = new StoragePath(TIMELINE_LAYOUT_V1.getTimelinePath(metaClient.getBasePath()), fileName.replaceAll(UNDERSCORE + "\\d+", ""));
+    StoragePath toPath = new StoragePath(TIMELINE_LAYOUT_V1.getTimelinePath(metaClient.getBasePath()), replacedFileName);
     boolean success = true;
-    if (fileName.contains(UNDERSCORE)) {
-      try {
-        if (instant.getAction().equals(HoodieTimeline.COMMIT_ACTION) || instant.getAction().equals(HoodieTimeline.DELTA_COMMIT_ACTION)) {
-          HoodieCommitMetadata commitMetadata =
-              commitMetadataSerDeV2.deserialize(instant, metaClient.getActiveTimeline().getInstantDetails(instant).get(), HoodieCommitMetadata.class);
-          Option<byte[]> data = commitMetadataSerDeV1.serialize(commitMetadata);
-          String toPathStr = toPath.toUri().toString();
-          activeTimelineV1.createFileInMetaPath(toPathStr, data, true);
-          /**
-           * When we downgrade the table from 1.0 to 0.x, it is important to set the modification
-           * timestamp of the 0.x completed instant to match the completion time of the
-           * corresponding 1.x instant. Otherwise,  log files in previous file slices could
-           * be wrongly attributed to latest file slice for 1.0 readers.
-           * (see HoodieFileGroup.getBaseInstantTime)
-           */
-          if (modificationTime > 0) {
-            metaClient.getStorage().setModificationTime(toPath, modificationTime);
-          }
-          metaClient.getStorage().deleteFile(fromPath);
-        } else {
-          success = metaClient.getStorage().rename(fromPath, toPath);
-        }
-        // TODO: We need to rename the action-related part of the metadata file name here when we bring separate action name for clustering/compaction in 1.x as well.
-        if (!success) {
-          throw new HoodieIOException("an error that occurred while renaming " + fromPath + " to: " + toPath);
-        }
-        return true;
-      } catch (IOException e) {
-        LOG.error("Can not to complete the downgrade from version eight to version seven. The reason for failure is {}", e.getMessage());
-        throw new HoodieException(e);
+    if (instant.getAction().equals(HoodieTimeline.COMMIT_ACTION) || instant.getAction().equals(HoodieTimeline.DELTA_COMMIT_ACTION)) {
+      HoodieCommitMetadata commitMetadata =
+          commitMetadataSerDeV2.deserialize(instant, metaClient.getActiveTimeline().getInstantDetails(instant).get(), HoodieCommitMetadata.class);
+      Option<byte[]> data = commitMetadataSerDeV1.serialize(commitMetadata);
+      String toPathStr = toPath.toUri().toString();
+      activeTimelineV1.createFileInMetaPath(toPathStr, data, true);
+      /**
+       * When we downgrade the table from 1.0 to 0.x, it is important to set the modification
+       * timestamp of the 0.x completed instant to match the completion time of the
+       * corresponding 1.x instant. Otherwise,  log files in previous file slices could
+       * be wrongly attributed to latest file slice for 1.0 readers.
+       * (see HoodieFileGroup.getBaseInstantTime)
+       */
+      if (modificationTime > 0) {
+        metaClient.getStorage().setModificationTime(toPath, modificationTime);
       }
+      metaClient.getStorage().deleteFile(fromPath);
     } else {
       success = metaClient.getStorage().rename(fromPath, toPath);
     }
-    return false;
+    if (!success) {
+      throw new HoodieIOException("an error that occurred while renaming " + fromPath + " to: " + toPath);
+    }
+    return true;
   }
 
   static boolean upgradeActiveTimelineInstant(HoodieInstant instant, HoodieTableMetaClient metaClient, String originalFileName,
                                               CommitMetadataSerDeV2 commitMetadataSerDeV2, CommitMetadataSerDeV1 commitMetadataSerDeV1,
-                                              ActiveTimelineV1 activeTimelineV1) {
+                                              ActiveTimelineV2 activeTimelineV2) {
     String replacedFileName = originalFileName;
     boolean isCompleted = instant.isCompleted();
     // Rename the metadata file name from the ${instant_time}.action[.state] format in version 0.x
@@ -327,32 +312,25 @@ public class UpgradeDowngradeUtils {
       replacedFileName = replacedFileName.replace(instant.getAction(), SIX_TO_EIGHT_TIMELINE_ACTION_MAP.get(instant.getAction()));
     }
     try {
-      return renameInstantFile(instant, metaClient, originalFileName, replacedFileName, commitMetadataSerDeV1, commitMetadataSerDeV2, SIX_TO_EIGHT_TMP_FILE_PREFIX, activeTimelineV1);
+      return renameTimelineV1InstantFileToV2Format(instant, metaClient, originalFileName, replacedFileName, commitMetadataSerDeV1, commitMetadataSerDeV2, activeTimelineV2);
     } catch (IOException e) {
       LOG.warn("Can not to complete the upgrade from version seven to version eight. The reason for failure is {}", e.getMessage());
     }
     return false;
   }
 
-  private static boolean renameInstantFile(HoodieInstant instant, HoodieTableMetaClient metaClient, String originalFileName, String replacedFileName,
-                                           CommitMetadataSerDe commitMetadataDeserializer, CommitMetadataSerDe commitMetadataSerializer,
-                                           String tmpFilePrefix, ActiveTimelineV1 activeTimeline) throws IOException {
-    StoragePath fromPath = new StoragePath(metaClient.getMetaPath(), originalFileName);
-    StoragePath toPath = new StoragePath(metaClient.getMetaPath(), replacedFileName);
+  private static boolean renameTimelineV1InstantFileToV2Format(HoodieInstant instant, HoodieTableMetaClient metaClient, String originalFileName, String replacedFileName,
+                                                               CommitMetadataSerDeV1 commitMetadataSerDeV1, CommitMetadataSerDeV2 commitMetadataSerDeV2, ActiveTimelineV2 activeTimelineV2)
+      throws IOException {
+    StoragePath fromPath = new StoragePath(TIMELINE_LAYOUT_V1.getTimelinePath(metaClient.getBasePath()), originalFileName);
+    StoragePath toPath = new StoragePath(TIMELINE_LAYOUT_V2.getTimelinePath(metaClient.getBasePath()), replacedFileName);
     boolean success = true;
     if (instant.getAction().equals(HoodieTimeline.COMMIT_ACTION) || instant.getAction().equals(HoodieTimeline.DELTA_COMMIT_ACTION)) {
       HoodieCommitMetadata commitMetadata =
-          commitMetadataDeserializer.deserialize(instant, metaClient.getActiveTimeline().getInstantDetails(instant).get(), HoodieCommitMetadata.class);
-      Option<byte[]> data = commitMetadataSerializer.serialize(commitMetadata);
-      // Create a temporary file to store the json metadata.
-      String fileExtension = commitMetadataSerializer instanceof CommitMetadataSerDeV1 ? ".json" : ".avro";
-      String tmpFileName = tmpFilePrefix + UUID.randomUUID() + fileExtension;
-      StoragePath tmpPath = new StoragePath(metaClient.getTempFolderPath(), tmpFileName);
-      String tmpPathStr = tmpPath.toUri().toString();
-      activeTimeline.createFileInMetaPath(tmpPathStr, data, true);
-      // Note. this is a 2 step. First we create the V1 commit file and then delete file. If it fails in the middle, rerunning downgrade will be idempotent.
-      metaClient.getStorage().deleteFile(toPath); // First delete if it was created by previous failed downgrade.
-      success = metaClient.getStorage().rename(tmpPath, toPath);
+          commitMetadataSerDeV1.deserialize(instant, metaClient.getActiveTimeline().getInstantDetails(instant).get(), HoodieCommitMetadata.class);
+      Option<byte[]> data = commitMetadataSerDeV2.serialize(commitMetadata);
+      String toPathStr = toPath.toUri().toString();
+      activeTimelineV2.createFileInMetaPath(toPathStr, data, true);
       metaClient.getStorage().deleteFile(fromPath);
     } else {
       success = metaClient.getStorage().rename(fromPath, toPath);
