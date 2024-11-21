@@ -28,6 +28,7 @@ import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.InstantFileNameGenerator;
+import org.apache.hudi.common.table.timeline.versioning.TimelineLayoutVersion;
 import org.apache.hudi.common.table.timeline.versioning.v1.ActiveTimelineV1;
 import org.apache.hudi.common.table.timeline.versioning.v1.CommitMetadataSerDeV1;
 import org.apache.hudi.common.table.timeline.versioning.v2.ActiveTimelineV2;
@@ -38,6 +39,7 @@ import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieIOException;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.keygen.constant.KeyGeneratorType;
+import org.apache.hudi.storage.StoragePath;
 import org.apache.hudi.table.HoodieTable;
 
 import org.slf4j.Logger;
@@ -70,6 +72,12 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     HoodieTableConfig tableConfig = metaClient.getTableConfig();
     // Rollback and run compaction in one step
     rollbackFailedWritesAndCompact(table, context, config, upgradeDowngradeHelper, HoodieTableType.MERGE_ON_READ.equals(table.getMetaClient().getTableType()));
+    try {
+      HoodieTableMetaClient.createTableLayoutOnStorage(context.getStorageConf(), new StoragePath(config.getBasePath()), config.getProps(), TimelineLayoutVersion.VERSION_2, false);
+    } catch (IOException e) {
+      LOG.error("Failed to create table layout on storage for timeline layout version {}", TimelineLayoutVersion.VERSION_2, e);
+      throw new HoodieIOException("Failed to create table layout on storage", e);
+    }
 
     // handle table properties upgrade
     Map<ConfigProperty, String> tablePropsToAdd = new HashMap<>();
@@ -120,22 +128,26 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
   }
 
   static void setRecordMergeMode(HoodieWriteConfig config, HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
-    Triple<RecordMergeMode, String, String> mergingConfigs =
-        HoodieTableConfig.inferCorrectMergingBehavior(config.getRecordMergeMode(), tableConfig.getPayloadClass(), tableConfig.getRecordMergeStrategyId());
-    tablePropsToAdd.put(HoodieTableConfig.RECORD_MERGE_MODE, mergingConfigs.getLeft().name());
-    if (StringUtils.nonEmpty(mergingConfigs.getMiddle())) {
-      tablePropsToAdd.put(HoodieTableConfig.PAYLOAD_CLASS_NAME, mergingConfigs.getMiddle());
-    }
-    if (StringUtils.nonEmpty(mergingConfigs.getRight())) {
-      tablePropsToAdd.put(HoodieTableConfig.RECORD_MERGE_STRATEGY_ID, mergingConfigs.getRight());
+    if (tableConfig.contains(HoodieTableConfig.RECORD_MERGE_MODE) || tableConfig.contains(HoodieTableConfig.PAYLOAD_CLASS_NAME) || tableConfig.contains(HoodieTableConfig.RECORD_MERGE_STRATEGY_ID)) {
+      Triple<RecordMergeMode, String, String> mergingConfigs =
+          HoodieTableConfig.inferCorrectMergingBehavior(tableConfig.getRecordMergeMode(), tableConfig.getPayloadClass(), tableConfig.getRecordMergeStrategyId());
+      tablePropsToAdd.put(HoodieTableConfig.RECORD_MERGE_MODE, mergingConfigs.getLeft().name());
+      if (StringUtils.nonEmpty(mergingConfigs.getMiddle())) {
+        tablePropsToAdd.put(HoodieTableConfig.PAYLOAD_CLASS_NAME, mergingConfigs.getMiddle());
+      }
+      if (StringUtils.nonEmpty(mergingConfigs.getRight())) {
+        tablePropsToAdd.put(HoodieTableConfig.RECORD_MERGE_STRATEGY_ID, mergingConfigs.getRight());
+      }
     }
   }
 
   static void upgradeBootstrapIndexType(HoodieWriteConfig config, HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
-    String bootstrapIndexClass = BootstrapIndexType.getBootstrapIndexClassName(tableConfig);
-    if (StringUtils.nonEmpty(bootstrapIndexClass)) {
-      tablePropsToAdd.put(HoodieTableConfig.BOOTSTRAP_INDEX_CLASS_NAME, bootstrapIndexClass);
-      tablePropsToAdd.put(HoodieTableConfig.BOOTSTRAP_INDEX_TYPE, BootstrapIndexType.fromClassName(bootstrapIndexClass).name());
+    if (tableConfig.contains(HoodieTableConfig.BOOTSTRAP_INDEX_CLASS_NAME) || tableConfig.contains(HoodieTableConfig.BOOTSTRAP_INDEX_TYPE)) {
+      String bootstrapIndexClass = BootstrapIndexType.getBootstrapIndexClassName(tableConfig);
+      if (StringUtils.nonEmpty(bootstrapIndexClass)) {
+        tablePropsToAdd.put(HoodieTableConfig.BOOTSTRAP_INDEX_CLASS_NAME, bootstrapIndexClass);
+        tablePropsToAdd.put(HoodieTableConfig.BOOTSTRAP_INDEX_TYPE, BootstrapIndexType.fromClassName(bootstrapIndexClass).name());
+      }
     }
   }
 
