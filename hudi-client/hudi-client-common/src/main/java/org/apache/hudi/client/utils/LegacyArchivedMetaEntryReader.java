@@ -82,6 +82,10 @@ public class LegacyArchivedMetaEntryReader {
     return loadInstants(null);
   }
 
+  public ClosableIterator<ActiveAction> getActiveActionsIterator(HoodieArchivedTimeline.TimeRangeFilter filter) {
+    return loadInstants(filter);
+  }
+
   /**
    * Reads the avro record for instant and details.
    */

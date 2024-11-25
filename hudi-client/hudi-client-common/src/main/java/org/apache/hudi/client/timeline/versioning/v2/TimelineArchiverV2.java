@@ -40,12 +40,14 @@ import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieLockException;
+import org.apache.hudi.exception.HoodieNotSupportedException;
 import org.apache.hudi.metadata.HoodieTableMetadata;
 import org.apache.hudi.table.HoodieTable;
 import org.apache.hudi.table.action.compact.CompactionTriggerStrategy;
 import org.apache.hudi.table.marker.WriteMarkers;
 import org.apache.hudi.table.marker.WriteMarkersFactory;
 
+import org.apache.avro.generic.IndexedRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,6 +111,11 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
         txnManager.endTransaction(Option.empty());
       }
     }
+  }
+
+  @Override
+  public void archiveRecords(HoodieEngineContext context, List<IndexedRecord> archiveRecords) throws IOException {
+    throw new HoodieNotSupportedException("Archiving records is not supported in timeline archiver v2");
   }
 
   private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {

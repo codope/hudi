@@ -24,6 +24,8 @@ import org.apache.hudi.common.model.HoodieAvroPayload;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.util.Option;
 
+import org.apache.avro.generic.IndexedRecord;
+
 import java.io.IOException;
 import java.util.List;
 
@@ -47,4 +49,9 @@ public interface HoodieTimelineArchiver<T extends HoodieAvroPayload, I, K, O> {
    * Archive given instants.
    */
   int archiveIfRequired(HoodieEngineContext context, boolean acquireLock, Option<List<HoodieInstant>> instantsToArchiveOpt) throws IOException;
+
+  /**
+   * Archive given instants.
+   */
+  void archiveRecords(HoodieEngineContext context, List<IndexedRecord> archiveRecords) throws IOException;
 }

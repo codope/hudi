@@ -30,6 +30,7 @@ import org.apache.hudi.common.model.HoodieTableType;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
+import org.apache.hudi.common.table.timeline.ArchivedTimelineLoader;
 import org.apache.hudi.common.table.timeline.HoodieArchivedTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
@@ -38,6 +39,7 @@ import org.apache.hudi.common.table.timeline.versioning.TimelineLayoutVersion;
 import org.apache.hudi.common.table.timeline.versioning.v1.ActiveTimelineV1;
 import org.apache.hudi.common.table.timeline.versioning.v1.CommitMetadataSerDeV1;
 import org.apache.hudi.common.table.timeline.versioning.v2.ActiveTimelineV2;
+import org.apache.hudi.common.table.timeline.versioning.v2.ArchivedTimelineLoaderV2;
 import org.apache.hudi.common.table.timeline.versioning.v2.CommitMetadataSerDeV2;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.StringUtils;
@@ -54,6 +56,7 @@ import org.apache.hudi.storage.HoodieStorage;
 import org.apache.hudi.storage.StoragePath;
 import org.apache.hudi.table.HoodieTable;
 
+import org.apache.avro.generic.GenericRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -194,8 +197,29 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     }
 
     try {
-      HoodieTimelineArchiver archiver = TimelineArchivers.getInstance(table.getMetaClient().getTimelineLayoutVersion(), config, table);
-      archiver.archiveIfRequired(engineContext, false, Option.of(lsmArchivedTimeline.getInstants()));
+      HoodieTimelineArchiver archiver = TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_1, config, table);
+      List<HoodieInstant> instantsToArchive = lsmArchivedTimeline.getInstants();
+      int batchSize = config.getCommitArchivalBatchSize();
+      for (int i = 0; i < instantsToArchive.size(); i += batchSize) {
+        int end = Math.min(i + batchSize, instantsToArchive.size());
+        List<HoodieInstant> batch = instantsToArchive.subList(i, end);
+
+        // Create time range filter for the batch
+        String startTs = batch.get(0).getCompletionTime();
+        String endTs = batch.get(batch.size() - 1).getCompletionTime();
+        HoodieArchivedTimeline.TimeRangeFilter timeRangeFilter = new HoodieArchivedTimeline.TimeRangeFilter(startTs, endTs);
+
+        // Load and process instants in the batch
+        Map<String, GenericRecord> archivedInstantRecords = new HashMap<>();
+        ArchivedTimelineLoader timelineLoader = new ArchivedTimelineLoaderV2();
+        timelineLoader.loadInstants(
+            table.getMetaClient(),
+            timeRangeFilter,
+            HoodieArchivedTimeline.LoadMode.PLAN,
+            record -> true,
+            archivedInstantRecords::put);
+        archiver.archiveRecords(engineContext, new ArrayList<>(archivedInstantRecords.values()));
+      }
     } catch (Exception e) {
       LOG.warn("Failed to downgrade LSM timeline to old archived format");
       if (config.isFailOnTimelineArchivingEnabled()) {

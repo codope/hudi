@@ -160,6 +160,19 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
     }
   }
 
+  @Override
+  public void archiveRecords(HoodieEngineContext context, List<IndexedRecord> archiveRecords) throws HoodieCommitException {
+    try {
+      Schema wrapperSchema = HoodieArchivedMetaEntry.getClassSchema();
+      this.writer = openWriter();
+      writeToFile(wrapperSchema, archiveRecords);
+    } catch (Exception e) {
+      throw new HoodieCommitException("Failed to archive commits", e);
+    } finally {
+      close();
+    }
+  }
+
   private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {
     try {
       boolean success = true;

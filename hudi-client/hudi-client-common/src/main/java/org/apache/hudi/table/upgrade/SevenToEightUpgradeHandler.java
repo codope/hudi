@@ -18,8 +18,8 @@
 
 package org.apache.hudi.table.upgrade;
 
-import org.apache.hudi.client.timeline.HoodieTimelineArchiver;
-import org.apache.hudi.client.timeline.TimelineArchivers;
+import org.apache.hudi.client.timeline.versioning.v2.LSMTimelineWriter;
+import org.apache.hudi.client.utils.LegacyArchivedMetaEntryReader;
 import org.apache.hudi.common.config.ConfigProperty;
 import org.apache.hudi.common.config.RecordMergeMode;
 import org.apache.hudi.common.engine.HoodieEngineContext;
@@ -29,6 +29,7 @@ import org.apache.hudi.common.model.HoodieTableType;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
+import org.apache.hudi.common.table.timeline.ActiveAction;
 import org.apache.hudi.common.table.timeline.HoodieArchivedTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
@@ -41,6 +42,7 @@ import org.apache.hudi.common.table.timeline.versioning.v2.CommitMetadataSerDeV2
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.common.util.ValidationUtils;
+import org.apache.hudi.common.util.collection.ClosableIterator;
 import org.apache.hudi.common.util.collection.Triple;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
@@ -184,8 +186,30 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
       return;
     }
     try {
-      HoodieTimelineArchiver archiver = TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_2, config, table);
-      archiver.archiveIfRequired(engineContext, false, Option.of(archivedTimeline.getInstants()));
+      LegacyArchivedMetaEntryReader reader = new LegacyArchivedMetaEntryReader(table.getMetaClient());
+      ClosableIterator<ActiveAction> iterator = reader.getActiveActionsIterator();
+      LSMTimelineWriter lsmTimelineWriter = LSMTimelineWriter.getInstance(config, table);
+      int batchSize = config.getCommitArchivalBatchSize();
+      List<ActiveAction> activeActionsBatch = new ArrayList<>(batchSize);
+      try {
+        while (iterator.hasNext()) {
+          activeActionsBatch.add(iterator.next());
+          // If the batch is full, write it to the LSM timeline
+          if (activeActionsBatch.size() == batchSize) {
+            lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty());
+            lsmTimelineWriter.compactAndClean(engineContext);
+            activeActionsBatch.clear();
+          }
+        }
+
+        // Write any remaining actions in the final batch
+        if (!activeActionsBatch.isEmpty()) {
+          lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty());
+          lsmTimelineWriter.compactAndClean(engineContext);
+        }
+      } finally {
+        iterator.close();
+      }
     } catch (Exception e) {
       LOG.warn("Failed to upgrade to LSM timeline");
       if (config.isFailOnTimelineArchivingEnabled()) {
