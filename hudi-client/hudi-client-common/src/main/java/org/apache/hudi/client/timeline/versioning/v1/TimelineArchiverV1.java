@@ -145,15 +145,14 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
   }
 
   @Override
-  public int archiveIfRequired(HoodieEngineContext context, boolean acquireLock) throws IOException {
+  public int archiveIfRequired(HoodieEngineContext context, boolean acquireLock, Option<List<HoodieInstant>> instantsToArchiveOpt) throws IOException {
     //NOTE:  We permanently disable merging archive files. This is different from 0.15 behavior.
     try {
       if (acquireLock) {
         // there is no owner or instant time per se for archival.
         txnManager.beginTransaction(Option.empty(), Option.empty());
       }
-      List<HoodieInstant> instantsToArchive = getInstantsToArchive().collect(Collectors.toList());
-      return archiveInstants(context, instantsToArchive, false);
+      return archiveInstants(context, instantsToArchiveOpt.orElse(getInstantsToArchive().collect(Collectors.toList())));
     } finally {
       if (acquireLock) {
         txnManager.endTransaction(Option.empty());
@@ -161,13 +160,8 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
     }
   }
 
-  @Override
-  public int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive, boolean acquireLock) throws IOException {
+  private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {
     try {
-      if (acquireLock) {
-        // there is no owner or instant time per se for archival.
-        txnManager.beginTransaction(Option.empty(), Option.empty());
-      }
       boolean success = true;
       if (!instantsToArchive.isEmpty()) {
         this.writer = openWriter();
@@ -178,13 +172,9 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
       } else {
         LOG.info("No Instants to archive");
       }
-
       return instantsToArchive.size();
     } finally {
       close();
-      if (acquireLock) {
-        txnManager.endTransaction(Option.empty());
-      }
     }
   }
 

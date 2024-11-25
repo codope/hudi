@@ -163,8 +163,8 @@ class TestEightToSevenDowngradeHandler {
       downgradeHandler.downgrade(config, context, "20211012123000", upgradeDowngradeHelper);
       upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.runCompaction(any(), any(), any(), any()), times(1));
       upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.syncCompactionRequestedFileToAuxiliaryFolder(any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.downgradeFromLSMTimeline(any(), any(), any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.downgradeActiveTimelineInstant(any(), any(), any(), any(), any(), any()), times(2));
+      upgradeDowngradeUtilsMock.verify(() -> EightToSevenDowngradeHandler.downgradeFromLSMTimeline(any(), any(), any()), times(1));
+      upgradeDowngradeUtilsMock.verify(() -> EightToSevenDowngradeHandler.downgradeActiveTimelineInstant(any(), any(), any(), any(), any(), any()), times(2));
     }
   }
 

@@ -133,8 +133,8 @@ public class TestSevenToEightUpgradeHandler {
 
       upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.runCompaction(any(), any(), any(), any()), times(1));
       upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.syncCompactionRequestedFileToAuxiliaryFolder(any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.upgradeToLSMTimeline(any(), any(), any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.upgradeActiveTimelineInstant(any(), any(), any(), any(), any(), any()), times(instants.size()));
+      upgradeDowngradeUtilsMock.verify(() -> SevenToEightUpgradeHandler.upgradeToLSMTimeline(any(), any(), any()), times(1));
+      upgradeDowngradeUtilsMock.verify(() -> SevenToEightUpgradeHandler.upgradeActiveTimelineInstant(any(), any(), any(), any(), any(), any()), times(instants.size()));
     }
   }
 }

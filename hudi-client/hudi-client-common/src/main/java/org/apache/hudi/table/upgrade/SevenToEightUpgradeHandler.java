@@ -18,24 +18,32 @@
 
 package org.apache.hudi.table.upgrade;
 
+import org.apache.hudi.client.timeline.HoodieTimelineArchiver;
+import org.apache.hudi.client.timeline.TimelineArchivers;
 import org.apache.hudi.common.config.ConfigProperty;
 import org.apache.hudi.common.config.RecordMergeMode;
 import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.model.BootstrapIndexType;
+import org.apache.hudi.common.model.HoodieCommitMetadata;
 import org.apache.hudi.common.model.HoodieTableType;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
+import org.apache.hudi.common.table.timeline.HoodieArchivedTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
+import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.table.timeline.InstantFileNameGenerator;
 import org.apache.hudi.common.table.timeline.versioning.TimelineLayoutVersion;
 import org.apache.hudi.common.table.timeline.versioning.v1.ActiveTimelineV1;
 import org.apache.hudi.common.table.timeline.versioning.v1.CommitMetadataSerDeV1;
 import org.apache.hudi.common.table.timeline.versioning.v2.ActiveTimelineV2;
 import org.apache.hudi.common.table.timeline.versioning.v2.CommitMetadataSerDeV2;
+import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.StringUtils;
+import org.apache.hudi.common.util.ValidationUtils;
 import org.apache.hudi.common.util.collection.Triple;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.keygen.constant.KeyGeneratorType;
@@ -51,9 +59,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.hudi.common.table.timeline.HoodieInstant.UNDERSCORE;
+import static org.apache.hudi.common.table.timeline.TimelineLayout.TIMELINE_LAYOUT_V1;
+import static org.apache.hudi.common.table.timeline.TimelineLayout.TIMELINE_LAYOUT_V2;
+import static org.apache.hudi.table.upgrade.UpgradeDowngradeUtils.SIX_TO_EIGHT_TIMELINE_ACTION_MAP;
 import static org.apache.hudi.table.upgrade.UpgradeDowngradeUtils.rollbackFailedWritesAndCompact;
-import static org.apache.hudi.table.upgrade.UpgradeDowngradeUtils.upgradeActiveTimelineInstant;
-import static org.apache.hudi.table.upgrade.UpgradeDowngradeUtils.upgradeToLSMTimeline;
 
 /**
  * Version 7 is going to be placeholder version for bridge release 0.16.0.
@@ -126,7 +136,11 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
   }
 
   static void setInitialVersion(HoodieWriteConfig config, HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
-    tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, HoodieTableVersion.SIX.name());
+    if (tableConfig.contains(HoodieTableConfig.VERSION)) {
+      tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, tableConfig.getTableVersion().name());
+    } else {
+      tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, HoodieTableVersion.SIX.name());
+    }
   }
 
   static void setRecordMergeMode(HoodieWriteConfig config, HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
@@ -159,5 +173,70 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
       tablePropsToAdd.put(HoodieTableConfig.KEY_GENERATOR_CLASS_NAME, keyGenerator);
       tablePropsToAdd.put(HoodieTableConfig.KEY_GENERATOR_TYPE, KeyGeneratorType.fromClassName(keyGenerator).name());
     }
+  }
+
+  static void upgradeToLSMTimeline(HoodieTable table, HoodieEngineContext engineContext, HoodieWriteConfig config) {
+    table.getMetaClient().getTableConfig().getTimelineLayoutVersion().ifPresent(
+        timelineLayoutVersion -> ValidationUtils.checkState(TimelineLayoutVersion.LAYOUT_VERSION_1.equals(timelineLayoutVersion),
+            "Upgrade to LSM timeline is only supported for layout version 1. Given version: " + timelineLayoutVersion));
+    HoodieArchivedTimeline archivedTimeline = table.getMetaClient().getArchivedTimeline();
+    if (archivedTimeline.getInstants().isEmpty()) {
+      return;
+    }
+    try {
+      HoodieTimelineArchiver archiver = TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_2, config, table);
+      archiver.archiveIfRequired(engineContext, false, Option.of(archivedTimeline.getInstants()));
+    } catch (Exception e) {
+      LOG.warn("Failed to upgrade to LSM timeline");
+      if (config.isFailOnTimelineArchivingEnabled()) {
+        throw new HoodieException("Failed to upgrade LSM timeline", e);
+      }
+    }
+  }
+
+  static boolean upgradeActiveTimelineInstant(HoodieInstant instant, String originalFileName, HoodieTableMetaClient metaClient, CommitMetadataSerDeV1 commitMetadataSerDeV1,
+                                              CommitMetadataSerDeV2 commitMetadataSerDeV2, ActiveTimelineV2 activeTimelineV2) {
+    String replacedFileName = originalFileName;
+    boolean isCompleted = instant.isCompleted();
+    // Rename the metadata file name from the ${instant_time}.action[.state] format in version 0.x
+    // to the ${instant_time}_${completion_time}.action[.state] format in version 1.x.
+    if (isCompleted) {
+      String completionTime = instant.getCompletionTime(); // this is the file modification time
+      String startTime = instant.requestedTime();
+      replacedFileName = replacedFileName.replace(startTime, startTime + UNDERSCORE + completionTime);
+    }
+    // Rename the action if necessary (e.g., REPLACE_COMMIT_ACTION to CLUSTERING_ACTION).
+    // NOTE: New action names were only applied for pending instants. Completed instants do not have any change in action names.
+    if (SIX_TO_EIGHT_TIMELINE_ACTION_MAP.containsKey(instant.getAction()) && !isCompleted) {
+      replacedFileName = replacedFileName.replace(instant.getAction(), SIX_TO_EIGHT_TIMELINE_ACTION_MAP.get(instant.getAction()));
+    }
+    try {
+      return renameTimelineV1InstantFileToV2Format(instant, metaClient, originalFileName, replacedFileName, commitMetadataSerDeV1, commitMetadataSerDeV2, activeTimelineV2);
+    } catch (IOException e) {
+      LOG.warn("Can not to complete the upgrade from version seven to version eight. The reason for failure is {}", e.getMessage());
+    }
+    return false;
+  }
+
+  static boolean renameTimelineV1InstantFileToV2Format(HoodieInstant instant, HoodieTableMetaClient metaClient, String originalFileName, String replacedFileName,
+                                                       CommitMetadataSerDeV1 commitMetadataSerDeV1, CommitMetadataSerDeV2 commitMetadataSerDeV2, ActiveTimelineV2 activeTimelineV2)
+      throws IOException {
+    StoragePath fromPath = new StoragePath(TIMELINE_LAYOUT_V1.getTimelinePathProvider().getTimelinePath(metaClient.getTableConfig(), metaClient.getBasePath()), originalFileName);
+    StoragePath toPath = new StoragePath(TIMELINE_LAYOUT_V2.getTimelinePathProvider().getTimelinePath(metaClient.getTableConfig(), metaClient.getBasePath()), replacedFileName);
+    boolean success = true;
+    if (instant.getAction().equals(HoodieTimeline.COMMIT_ACTION) || instant.getAction().equals(HoodieTimeline.DELTA_COMMIT_ACTION)) {
+      HoodieCommitMetadata commitMetadata =
+          commitMetadataSerDeV1.deserialize(instant, metaClient.getActiveTimeline().getInstantDetails(instant).get(), HoodieCommitMetadata.class);
+      Option<byte[]> data = commitMetadataSerDeV2.serialize(commitMetadata);
+      String toPathStr = toPath.toUri().toString();
+      activeTimelineV2.createFileInMetaPath(toPathStr, data, true);
+      metaClient.getStorage().deleteFile(fromPath);
+    } else {
+      success = metaClient.getStorage().rename(fromPath, toPath);
+    }
+    if (!success) {
+      throw new HoodieIOException("an error that occurred while renaming " + fromPath + " to: " + toPath);
+    }
+    return true;
   }
 }

@@ -91,7 +91,7 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
   }
 
   @Override
-  public int archiveIfRequired(HoodieEngineContext context, boolean acquireLock) throws IOException {
+  public int archiveIfRequired(HoodieEngineContext context, boolean acquireLock, Option<List<HoodieInstant>> instantsToArchiveOpt) throws IOException {
     try {
       if (acquireLock) {
         // there is no owner or instant time per se for archival.
@@ -103,8 +103,7 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
     }
 
     try {
-      List<HoodieInstant> instantsToArchive = getInstantsToArchive();
-      return archiveInstants(context, instantsToArchive, false);
+      return archiveInstants(context, instantsToArchiveOpt.orElse(getInstantsToArchive()));
     } finally {
       if (acquireLock) {
         txnManager.endTransaction(Option.empty());
@@ -112,42 +111,25 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
     }
   }
 
-  @Override
-  public int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive, boolean acquireLock) throws IOException {
-    try {
-      if (acquireLock) {
-        // there is no owner or instant time per se for archival.
-        txnManager.beginTransaction(Option.empty(), Option.empty());
-      }
-    } catch (HoodieLockException e) {
-      LOG.error("Fail to begin transaction", e);
-      return 0;
+  private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {
+    // Sort again because the cleaning and rollback instants could break the sequence.
+    List<ActiveAction> activeActions = getActiveActionsToArchive(instantsToArchive).sorted().collect(Collectors.toList());
+    if (!activeActions.isEmpty()) {
+      LOG.info("Archiving and deleting instants {}", activeActions);
+      Consumer<Exception> exceptionHandler = e -> {
+        if (this.config.isFailOnTimelineArchivingEnabled()) {
+          throw new HoodieException(e);
+        }
+      };
+      this.timelineWriter.write(activeActions, Option.of(action -> deleteAnyLeftOverMarkers(context, action)), Option.of(exceptionHandler));
+      LOG.debug("Deleting archived instants");
+      deleteArchivedActions(activeActions, context);
+      // triggers compaction and cleaning only after archiving action
+      this.timelineWriter.compactAndClean(context);
+    } else {
+      LOG.info("No Instants to archive");
     }
-
-    try {
-      // Sort again because the cleaning and rollback instants could break the sequence.
-      List<ActiveAction> activeActions = getActiveActionsToArchive(instantsToArchive).sorted().collect(Collectors.toList());
-      if (!activeActions.isEmpty()) {
-        LOG.info("Archiving and deleting instants {}", activeActions);
-        Consumer<Exception> exceptionHandler = e -> {
-          if (this.config.isFailOnTimelineArchivingEnabled()) {
-            throw new HoodieException(e);
-          }
-        };
-        this.timelineWriter.write(activeActions, Option.of(action -> deleteAnyLeftOverMarkers(context, action)), Option.of(exceptionHandler));
-        LOG.debug("Deleting archived instants");
-        deleteArchivedInstants(activeActions, context);
-        // triggers compaction and cleaning only after archiving action
-        this.timelineWriter.compactAndClean(context);
-      } else {
-        LOG.info("No Instants to archive");
-      }
-      return instantsToArchive.size();
-    } finally {
-      if (acquireLock) {
-        txnManager.endTransaction(Option.empty());
-      }
-    }
+    return instantsToArchive.size();
   }
 
   private List<HoodieInstant> getCleanAndRollbackInstantsToArchive(HoodieInstant latestCommitInstantToArchive) {
@@ -346,7 +328,7 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
     });
   }
 
-  private boolean deleteArchivedInstants(List<ActiveAction> activeActions, HoodieEngineContext context) {
+  private boolean deleteArchivedActions(List<ActiveAction> activeActions, HoodieEngineContext context) {
     List<HoodieInstant> pendingInstants = new ArrayList<>();
     List<HoodieInstant> completedInstants = new ArrayList<>();
 
