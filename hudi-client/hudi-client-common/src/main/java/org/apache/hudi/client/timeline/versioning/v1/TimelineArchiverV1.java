@@ -139,8 +139,21 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
         // there is no owner or instant time per se for archival.
         txnManager.beginTransaction(Option.empty(), Option.empty());
       }
-      return archiveInstants(context, getInstantsToArchive().collect(Collectors.toList()));
+      List<HoodieInstant> instantsToArchive = getInstantsToArchive().collect(Collectors.toList());
+      boolean success = true;
+      if (!instantsToArchive.isEmpty()) {
+        this.writer = openWriter();
+        LOG.info("Archiving instants " + instantsToArchive);
+        archive(context, instantsToArchive);
+        LOG.info("Deleting archived instants " + instantsToArchive);
+        success = deleteArchivedInstants(instantsToArchive, context);
+      } else {
+        LOG.info("No Instants to archive");
+      }
+
+      return instantsToArchive.size();
     } finally {
+      close();
       if (acquireLock) {
         txnManager.endTransaction(Option.empty());
       }
@@ -157,23 +170,6 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
       writeToFile(wrapperSchema, archiveRecords);
     } catch (Exception e) {
       throw new HoodieCommitException("Failed to archive commits", e);
-    } finally {
-      close();
-    }
-  }
-
-  private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {
-    try {
-      if (!instantsToArchive.isEmpty()) {
-        this.writer = openWriter();
-        LOG.info("Archiving instants " + instantsToArchive);
-        archive(context, instantsToArchive);
-        LOG.info("Deleting archived instants " + instantsToArchive);
-        deleteArchivedInstants(instantsToArchive, context);
-      } else {
-        LOG.info("No Instants to archive");
-      }
-      return instantsToArchive.size();
     } finally {
       close();
     }

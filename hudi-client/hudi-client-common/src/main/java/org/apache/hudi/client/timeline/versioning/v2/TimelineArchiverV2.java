@@ -103,33 +103,29 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
     }
 
     try {
-      return archiveInstants(context, getInstantsToArchive());
+      // Sort again because the cleaning and rollback instants could break the sequence.
+      List<ActiveAction> instantsToArchive = getInstantsToArchive().sorted().collect(Collectors.toList());
+      if (!instantsToArchive.isEmpty()) {
+        LOG.info("Archiving and deleting instants {}", instantsToArchive);
+        Consumer<Exception> exceptionHandler = e -> {
+          if (this.config.isFailOnTimelineArchivingEnabled()) {
+            throw new HoodieException(e);
+          }
+        };
+        this.timelineWriter.write(instantsToArchive, Option.of(action -> deleteAnyLeftOverMarkers(context, action)), Option.of(exceptionHandler));
+        LOG.debug("Deleting archived instants");
+        deleteArchivedActions(instantsToArchive, context);
+        // triggers compaction and cleaning only after archiving action
+        this.timelineWriter.compactAndClean(context);
+      } else {
+        LOG.info("No Instants to archive");
+      }
+      return instantsToArchive.size();
     } finally {
       if (acquireLock) {
         txnManager.endTransaction(Option.empty());
       }
     }
-  }
-
-  private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {
-    // Sort again because the cleaning and rollback instants could break the sequence.
-    List<ActiveAction> activeActions = getActiveActionsToArchive(instantsToArchive).sorted().collect(Collectors.toList());
-    if (!activeActions.isEmpty()) {
-      LOG.info("Archiving and deleting instants {}", activeActions);
-      Consumer<Exception> exceptionHandler = e -> {
-        if (this.config.isFailOnTimelineArchivingEnabled()) {
-          throw new HoodieException(e);
-        }
-      };
-      this.timelineWriter.write(activeActions, Option.of(action -> deleteAnyLeftOverMarkers(context, action)), Option.of(exceptionHandler));
-      LOG.debug("Deleting archived instants");
-      deleteArchivedActions(activeActions, context);
-      // triggers compaction and cleaning only after archiving action
-      this.timelineWriter.compactAndClean(context);
-    } else {
-      LOG.info("No Instants to archive");
-    }
-    return instantsToArchive.size();
   }
 
   private List<HoodieInstant> getCleanAndRollbackInstantsToArchive(HoodieInstant latestCommitInstantToArchive) {
@@ -286,9 +282,9 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
         .collect(Collectors.toList());
   }
 
-  private List<HoodieInstant> getInstantsToArchive() throws IOException {
+  private Stream<ActiveAction> getInstantsToArchive() throws IOException {
     if (config.isMetaserverEnabled()) {
-      return Collections.emptyList();
+      return Stream.empty();
     }
 
     // First get commit instants to archive.
@@ -302,10 +298,6 @@ public class TimelineArchiverV2<T extends HoodieAvroPayload, I, K, O> implements
       instantsToArchive.sort(InstantComparatorV2.REQUESTED_TIME_BASED_COMPARATOR);
     }
 
-    return instantsToArchive;
-  }
-
-  private Stream<ActiveAction> getActiveActionsToArchive(List<HoodieInstant> instantsToArchive) {
     // For archive, we need to include instant's all states.
     // The re-instantiation of the timeline may result in inconsistencies with the existing meta client active timeline,
     // When there is no lock guard of the archiving process, the 'raw' timeline could contain less distinct instants
