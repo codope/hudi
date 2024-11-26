@@ -30,7 +30,6 @@ import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
 import org.apache.hudi.common.table.timeline.ActiveAction;
-import org.apache.hudi.common.table.timeline.HoodieArchivedTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.table.timeline.InstantFileNameGenerator;
@@ -103,7 +102,7 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     // Handle timeline upgrade:
     //  - Rewrite instants in active timeline to new format
     //  - Convert archived timeline to new LSM timeline format
-    List<HoodieInstant> instants = new ArrayList<>();
+    List<HoodieInstant> instants;
     try {
       // We need to move all the instants - not just completed ones.
       instants = metaClient.scanHoodieInstantsFromFileSystem(metaClient.getTimelinePath(),
@@ -123,6 +122,7 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
         return upgradeActiveTimelineInstant(instant, originalFileName, metaClient, commitMetadataSerDeV1, commitMetadataSerDeV2, activeTimelineV2);
       }, instants.size());
     }
+
     upgradeToLSMTimeline(table, context, config);
 
     return tablePropsToAdd;
@@ -181,14 +181,11 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     table.getMetaClient().getTableConfig().getTimelineLayoutVersion().ifPresent(
         timelineLayoutVersion -> ValidationUtils.checkState(TimelineLayoutVersion.LAYOUT_VERSION_1.equals(timelineLayoutVersion),
             "Upgrade to LSM timeline is only supported for layout version 1. Given version: " + timelineLayoutVersion));
-    HoodieArchivedTimeline archivedTimeline = table.getMetaClient().getArchivedTimeline();
-    if (archivedTimeline.getInstants().isEmpty()) {
-      return;
-    }
     try {
       LegacyArchivedMetaEntryReader reader = new LegacyArchivedMetaEntryReader(table.getMetaClient());
       ClosableIterator<ActiveAction> iterator = reader.getActiveActionsIterator();
       LSMTimelineWriter lsmTimelineWriter = LSMTimelineWriter.getInstance(config, table);
+      StoragePath archivePath = new StoragePath(table.getMetaClient().getMetaPath(), "timeline/history");
       int batchSize = config.getCommitArchivalBatchSize();
       List<ActiveAction> activeActionsBatch = new ArrayList<>(batchSize);
       try {
@@ -196,7 +193,7 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
           activeActionsBatch.add(iterator.next());
           // If the batch is full, write it to the LSM timeline
           if (activeActionsBatch.size() == batchSize) {
-            lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty());
+            lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty(), archivePath);
             lsmTimelineWriter.compactAndClean(engineContext);
             activeActionsBatch.clear();
           }

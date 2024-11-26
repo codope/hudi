@@ -193,15 +193,12 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     table.getMetaClient().getTableConfig().getTimelineLayoutVersion().ifPresent(
         timelineLayoutVersion -> ValidationUtils.checkState(TimelineLayoutVersion.LAYOUT_VERSION_2.equals(timelineLayoutVersion),
             "Downgrade from LSM timeline is only supported for layout version 2. Given version: " + timelineLayoutVersion));
-    HoodieArchivedTimeline lsmArchivedTimeline = table.getMetaClient().getArchivedTimeline();
-    if (lsmArchivedTimeline.getInstants().isEmpty()) {
-      return;
-    }
 
     try {
       TimelineArchiverV1 archiver = (TimelineArchiverV1) TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_1, config, table);
       int batchSize = config.getCommitArchivalBatchSize();
-      try (ArchiveEntryFlusher flusher = new ArchiveEntryFlusher(archiver, batchSize)) {
+      StoragePath archivePath = new StoragePath(table.getMetaClient().getMetaPath(), "archived");
+      try (ArchiveEntryFlusher flusher = new ArchiveEntryFlusher(archiver, batchSize, archivePath)) {
         // Load and process instants in the batch
         ArchivedTimelineLoader timelineLoader = new ArchivedTimelineLoaderV2();
         timelineLoader.loadInstants(
@@ -226,19 +223,23 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     private final TimelineArchiverV1 archiverV1;
     private final List<GenericRecord> buffer;
     private final int batchSize;
+    private final StoragePath archivePath;
 
-    public ArchiveEntryFlusher(TimelineArchiverV1 archiverV1, int batchSize) {
+    public ArchiveEntryFlusher(TimelineArchiverV1 archiverV1, int batchSize, StoragePath archivePath) {
       this.archiverV1 = archiverV1;
       this.batchSize = batchSize;
       this.buffer = new ArrayList<>();
+      this.archivePath = archivePath;
     }
 
     @Override
     public void accept(String s, GenericRecord archiveEntry) {
       if (buffer.size() >= batchSize) {
-        archiverV1.flushArchiveEntries(new ArrayList<>(buffer));
+        archiverV1.flushArchiveEntries(new ArrayList<>(buffer), archivePath);
         buffer.clear();
       } else {
+        // TODO: we need to convert the HoodieLSMTimelineInstant back to HoodieArchivedMetaEntry before flushing.
+        // Caution that the encode has been changed (from json to avro) for plan and commit metadata.
         buffer.add(archiveEntry);
       }
     }
@@ -246,7 +247,7 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     @Override
     public void close() {
       if (!buffer.isEmpty()) {
-        archiverV1.flushArchiveEntries(new ArrayList<>(buffer));
+        archiverV1.flushArchiveEntries(new ArrayList<>(buffer), this.archivePath);
         buffer.clear();
       }
     }

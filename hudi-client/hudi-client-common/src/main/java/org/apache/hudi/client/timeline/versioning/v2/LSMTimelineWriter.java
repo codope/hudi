@@ -106,8 +106,24 @@ public class LSMTimelineWriter {
       List<ActiveAction> activeActions,
       Option<Consumer<ActiveAction>> preWriteCallback,
       Option<Consumer<Exception>> exceptionHandler) throws HoodieCommitException {
+    write(activeActions, preWriteCallback, exceptionHandler, metaClient.getArchivePath());
+  }
+
+  /**
+   * Writes the list of active actions into the timeline.
+   *
+   * @param activeActions    The active actions
+   * @param preWriteCallback The callback before writing each action
+   * @param exceptionHandler The handle for exception
+   * @param archivePath      The explicit archive path
+   */
+  public void write(
+      List<ActiveAction> activeActions,
+      Option<Consumer<ActiveAction>> preWriteCallback,
+      Option<Consumer<Exception>> exceptionHandler,
+      StoragePath archivePath) throws HoodieCommitException {
     ValidationUtils.checkArgument(!activeActions.isEmpty(), "The instant actions to write should not be empty");
-    StoragePath filePath = new StoragePath(metaClient.getArchivePath(),
+    StoragePath filePath = new StoragePath(archivePath,
         newFileName(activeActions.get(0).getInstantTime(), activeActions.get(activeActions.size() - 1).getInstantTime(), FILE_LAYER_ZERO));
     try (HoodieFileWriter writer = openWriter(filePath)) {
       Schema wrapperSchema = HoodieLSMTimelineInstant.getClassSchema();
