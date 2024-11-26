@@ -18,8 +18,8 @@
 
 package org.apache.hudi.table.upgrade;
 
-import org.apache.hudi.client.timeline.HoodieTimelineArchiver;
 import org.apache.hudi.client.timeline.TimelineArchivers;
+import org.apache.hudi.client.timeline.versioning.v1.TimelineArchiverV1;
 import org.apache.hudi.common.config.ConfigProperty;
 import org.apache.hudi.common.config.RecordMergeMode;
 import org.apache.hudi.common.engine.HoodieEngineContext;
@@ -67,6 +67,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.hudi.common.table.HoodieTableConfig.TABLE_METADATA_PARTITIONS;
@@ -101,7 +102,7 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     // Handle timeline downgrade:
     //  - Rename instants in active timeline to old format for table version 6
     //  - Convert LSM timeline format to archived timeline for table version 6
-    List<HoodieInstant> instants = new ArrayList<>();
+    List<HoodieInstant> instants;
     try {
       // We need to move all the instants - not just completed ones.
       instants = metaClient.scanHoodieInstantsFromFileSystem(metaClient.getTimelinePath(),
@@ -121,7 +122,7 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
         return downgradeActiveTimelineInstant(instant, originalFileName, metaClient, commitMetadataSerDeV2, commitMetadataSerDeV1, activeTimelineV1);
       }, instants.size());
     }
-    downgradeFromLSMTimeline(table, context, config);
+    downgradeFromLSMTimeline(table, config);
 
     // downgrade table properties
     downgradePartitionFields(config, metaClient.getTableConfig(), tablePropsToAdd);
@@ -186,7 +187,8 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     tableConfig.getProps().remove(HoodieTableConfig.KEY_GENERATOR_TYPE.key());
   }
 
-  static void downgradeFromLSMTimeline(HoodieTable table, HoodieEngineContext engineContext, HoodieWriteConfig config) {
+  @SuppressWarnings("rawtypes, unchecked")
+  static void downgradeFromLSMTimeline(HoodieTable table, HoodieWriteConfig config) {
     // if timeline layout version is present in the Option then check if it is LAYOUT_VERSION_2
     table.getMetaClient().getTableConfig().getTimelineLayoutVersion().ifPresent(
         timelineLayoutVersion -> ValidationUtils.checkState(TimelineLayoutVersion.LAYOUT_VERSION_2.equals(timelineLayoutVersion),
@@ -197,33 +199,55 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     }
 
     try {
-      HoodieTimelineArchiver archiver = TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_1, config, table);
-      List<HoodieInstant> instantsToArchive = lsmArchivedTimeline.getInstants();
+      TimelineArchiverV1 archiver = (TimelineArchiverV1) TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_1, config, table);
       int batchSize = config.getCommitArchivalBatchSize();
-      for (int i = 0; i < instantsToArchive.size(); i += batchSize) {
-        int end = Math.min(i + batchSize, instantsToArchive.size());
-        List<HoodieInstant> batch = instantsToArchive.subList(i, end);
-
-        // Create time range filter for the batch
-        String startTs = batch.get(0).getCompletionTime();
-        String endTs = batch.get(batch.size() - 1).getCompletionTime();
-        HoodieArchivedTimeline.TimeRangeFilter timeRangeFilter = new HoodieArchivedTimeline.TimeRangeFilter(startTs, endTs);
-
+      try (ArchiveEntryFlusher flusher = new ArchiveEntryFlusher(archiver, batchSize)) {
         // Load and process instants in the batch
-        Map<String, GenericRecord> archivedInstantRecords = new HashMap<>();
         ArchivedTimelineLoader timelineLoader = new ArchivedTimelineLoaderV2();
         timelineLoader.loadInstants(
             table.getMetaClient(),
-            timeRangeFilter,
+            null,
             HoodieArchivedTimeline.LoadMode.PLAN,
             record -> true,
-            archivedInstantRecords::put);
-        archiver.archiveRecords(engineContext, new ArrayList<>(archivedInstantRecords.values()));
+            flusher);
       }
     } catch (Exception e) {
       LOG.warn("Failed to downgrade LSM timeline to old archived format");
       if (config.isFailOnTimelineArchivingEnabled()) {
         throw new HoodieException("Failed to downgrade LSM timeline to old archived format", e);
+      }
+    }
+  }
+
+  /**
+   * Consumer for flushing the archive records.
+   */
+  private static class ArchiveEntryFlusher implements BiConsumer<String, GenericRecord>, AutoCloseable {
+    private final TimelineArchiverV1 archiverV1;
+    private final List<GenericRecord> buffer;
+    private final int batchSize;
+
+    public ArchiveEntryFlusher(TimelineArchiverV1 archiverV1, int batchSize) {
+      this.archiverV1 = archiverV1;
+      this.batchSize = batchSize;
+      this.buffer = new ArrayList<>();
+    }
+
+    @Override
+    public void accept(String s, GenericRecord archiveEntry) {
+      if (buffer.size() >= batchSize) {
+        archiverV1.flushArchiveEntries(new ArrayList<>(buffer));
+        buffer.clear();
+      } else {
+        buffer.add(archiveEntry);
+      }
+    }
+
+    @Override
+    public void close() {
+      if (!buffer.isEmpty()) {
+        archiverV1.flushArchiveEntries(new ArrayList<>(buffer));
+        buffer.clear();
       }
     }
   }

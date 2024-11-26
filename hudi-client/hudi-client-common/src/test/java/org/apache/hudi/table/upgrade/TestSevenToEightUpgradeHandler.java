@@ -27,6 +27,7 @@ import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.table.HoodieTable;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +50,7 @@ import static org.apache.hudi.common.table.HoodieTableConfig.INITIAL_VERSION;
 import static org.apache.hudi.common.table.HoodieTableConfig.KEY_GENERATOR_CLASS_NAME;
 import static org.apache.hudi.common.table.HoodieTableConfig.KEY_GENERATOR_TYPE;
 import static org.apache.hudi.common.table.HoodieTableConfig.PARTITION_FIELDS;
+import static org.apache.hudi.common.table.HoodieTableConfig.PAYLOAD_CLASS_NAME;
 import static org.apache.hudi.common.table.HoodieTableConfig.RECORD_MERGE_MODE;
 import static org.apache.hudi.common.table.timeline.HoodieTimeline.CLUSTERING_ACTION;
 import static org.apache.hudi.common.testutils.HoodieTestUtils.INSTANT_GENERATOR;
@@ -57,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.isA;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
@@ -89,7 +92,16 @@ public class TestSevenToEightUpgradeHandler {
     Map<ConfigProperty, String> tablePropsToAdd = new HashMap<>();
 
     // Simulate config values for key generator and partition path
-    when(config.getString(anyString())).thenReturn("partition_field");
+    when(config.getString(anyString())).thenAnswer(i -> {
+      Object arg0 = i.getArguments()[0];
+      if (arg0.equals(KeyGeneratorOptions.PARTITIONPATH_FIELD_NAME.key())) {
+        return "partition_field";
+      } else if (arg0.equals(HoodieWriteConfig.RECORD_MERGE_MODE.key())){
+        return RecordMergeMode.EVENT_TIME_ORDERING.name();
+      } else {
+        return null;
+      }
+    });
     when(tableConfig.getKeyGeneratorClassName()).thenReturn("org.apache.hudi.keygen.CustomKeyGenerator");
 
     // Upgrade properties
@@ -100,7 +112,8 @@ public class TestSevenToEightUpgradeHandler {
     assertEquals("SIX", tablePropsToAdd.get(INITIAL_VERSION));
 
     // Mock record merge mode configuration for merging behavior
-    when(config.getRecordMergeMode()).thenReturn(RecordMergeMode.EVENT_TIME_ORDERING);
+    when(tableConfig.contains(isA(ConfigProperty.class))).thenAnswer(i -> i.getArguments()[0].equals(PAYLOAD_CLASS_NAME));
+    when(tableConfig.getPayloadClass()).thenReturn("org.apache.hudi.common.model.DefaultHoodieRecordPayload");
     SevenToEightUpgradeHandler.setRecordMergeMode(config, tableConfig, tablePropsToAdd);
     assertTrue(tablePropsToAdd.containsKey(RECORD_MERGE_MODE));
     assertNotNull(tablePropsToAdd.get(RECORD_MERGE_MODE));

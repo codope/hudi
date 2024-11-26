@@ -211,9 +211,10 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
         iterator.close();
       }
     } catch (Exception e) {
-      LOG.warn("Failed to upgrade to LSM timeline");
       if (config.isFailOnTimelineArchivingEnabled()) {
-        throw new HoodieException("Failed to upgrade LSM timeline", e);
+        throw new HoodieException("Failed to upgrade to LSM timeline", e);
+      } else {
+        LOG.warn("Failed to upgrade to LSM timeline");
       }
     }
   }

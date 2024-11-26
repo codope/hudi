@@ -21,13 +21,8 @@ package org.apache.hudi.client.timeline;
 
 import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.model.HoodieAvroPayload;
-import org.apache.hudi.common.table.timeline.HoodieInstant;
-import org.apache.hudi.common.util.Option;
-
-import org.apache.avro.generic.IndexedRecord;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * Archiver to bound the growth of files under .hoodie meta path.
@@ -41,17 +36,5 @@ public interface HoodieTimelineArchiver<T extends HoodieAvroPayload, I, K, O> {
   /**
    * Check if commits need to be archived. If yes, archive commits.
    */
-  default int archiveIfRequired(HoodieEngineContext context, boolean acquireLock) throws IOException {
-    return archiveIfRequired(context, acquireLock, Option.empty());
-  }
-
-  /**
-   * Archive given instants.
-   */
-  int archiveIfRequired(HoodieEngineContext context, boolean acquireLock, Option<List<HoodieInstant>> instantsToArchiveOpt) throws IOException;
-
-  /**
-   * Archive given instants.
-   */
-  void archiveRecords(HoodieEngineContext context, List<IndexedRecord> archiveRecords) throws IOException;
+  int archiveIfRequired(HoodieEngineContext context, boolean acquireLock) throws IOException;
 }

@@ -121,19 +121,6 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
     }
   }
 
-  public Writer reOpenWriter() {
-    try {
-      if (this.writer != null) {
-        this.writer.close();
-        this.writer = null;
-      }
-      this.writer = openWriter();
-      return writer;
-    } catch (IOException e) {
-      throw new HoodieException("Unable to initialize HoodieLogFormat writer", e);
-    }
-  }
-
   private void close() {
     try {
       if (this.writer != null) {
@@ -145,14 +132,14 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
   }
 
   @Override
-  public int archiveIfRequired(HoodieEngineContext context, boolean acquireLock, Option<List<HoodieInstant>> instantsToArchiveOpt) throws IOException {
+  public int archiveIfRequired(HoodieEngineContext context, boolean acquireLock) throws IOException {
     //NOTE:  We permanently disable merging archive files. This is different from 0.15 behavior.
     try {
       if (acquireLock) {
         // there is no owner or instant time per se for archival.
         txnManager.beginTransaction(Option.empty(), Option.empty());
       }
-      return archiveInstants(context, instantsToArchiveOpt.orElse(getInstantsToArchive().collect(Collectors.toList())));
+      return archiveInstants(context, getInstantsToArchive().collect(Collectors.toList()));
     } finally {
       if (acquireLock) {
         txnManager.endTransaction(Option.empty());
@@ -160,8 +147,10 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
     }
   }
 
-  @Override
-  public void archiveRecords(HoodieEngineContext context, List<IndexedRecord> archiveRecords) throws HoodieCommitException {
+  /**
+   * Keeping for downgrade from 1.x LSM archived timeline.
+   */
+  public void flushArchiveEntries(List<IndexedRecord> archiveRecords) throws HoodieCommitException {
     try {
       Schema wrapperSchema = HoodieArchivedMetaEntry.getClassSchema();
       this.writer = openWriter();
@@ -175,13 +164,12 @@ public class TimelineArchiverV1<T extends HoodieAvroPayload, I, K, O> implements
 
   private int archiveInstants(HoodieEngineContext context, List<HoodieInstant> instantsToArchive) throws IOException {
     try {
-      boolean success = true;
       if (!instantsToArchive.isEmpty()) {
         this.writer = openWriter();
         LOG.info("Archiving instants " + instantsToArchive);
         archive(context, instantsToArchive);
         LOG.info("Deleting archived instants " + instantsToArchive);
-        success = deleteArchivedInstants(instantsToArchive, context);
+        deleteArchivedInstants(instantsToArchive, context);
       } else {
         LOG.info("No Instants to archive");
       }
