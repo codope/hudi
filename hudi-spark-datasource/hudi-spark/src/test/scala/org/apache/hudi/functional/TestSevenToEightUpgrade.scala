@@ -77,7 +77,8 @@ class TestSevenToEightUpgrade extends RecordLevelIndexTestBase {
   @Disabled("Only for local testing, will clean it up")
   def testDowngradeTable(): Unit = {
     val tableName = "trips_table"
-    val basePath = "file:///tmp/trips_table"
+    val basePath = "file:///tmp/trips_table_mor"
+    val tableType = "MERGE_ON_READ"
     // spark-shell
     /*val columns = Seq("ts","uuid","rider","driver","fare","city")
     val data =
@@ -110,9 +111,11 @@ class TestSevenToEightUpgrade extends RecordLevelIndexTestBase {
       option("hoodie.datasource.write.operation", "upsert").
       option("hoodie.datasource.write.partitionpath.field", "city").
       option("hoodie.table.name", tableName).
+      option(DataSourceWriteOptions.TABLE_TYPE.key, tableType).
       option(PRECOMBINE_FIELD_OPT_KEY, "ts").
       option(RECORDKEY_FIELD_OPT_KEY, "uuid").
       option("hoodie.metadata.enable", "false").
+      option("hoodie.write.auto.upgrade", "false"). // Disable auto upgrade
       mode(SaveMode.Append).
       save(basePath)
     // check data

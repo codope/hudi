@@ -77,12 +77,19 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
   @Override
   public Map<ConfigProperty, String> upgrade(HoodieWriteConfig config, HoodieEngineContext context,
                                              String instantTime, SupportsUpgradeDowngrade upgradeDowngradeHelper) {
-    config.setValue(HoodieWriteConfig.WRITE_TABLE_VERSION, String.valueOf(HoodieTableVersion.SIX.versionCode()));
+    Map<ConfigProperty, String> tablePropsToAdd = new HashMap<>();
     HoodieTable table = upgradeDowngradeHelper.getTable(config, context);
     HoodieTableMetaClient metaClient = table.getMetaClient();
     HoodieTableConfig tableConfig = metaClient.getTableConfig();
+    // If auto upgrade is disabled, set initial version and writer version to 6 and return
+    if (!config.autoUpgrade()) {
+      setInitialVersion(config, table.getMetaClient().getTableConfig(), tablePropsToAdd);
+      config.setValue(HoodieWriteConfig.WRITE_TABLE_VERSION, String.valueOf(HoodieTableVersion.SIX.versionCode()));
+      return tablePropsToAdd;
+    }
+
     // Rollback and run compaction in one step
-    rollbackFailedWritesAndCompact(table, context, config, upgradeDowngradeHelper, HoodieTableType.MERGE_ON_READ.equals(table.getMetaClient().getTableType()));
+    rollbackFailedWritesAndCompact(table, context, config, upgradeDowngradeHelper, HoodieTableType.MERGE_ON_READ.equals(table.getMetaClient().getTableType()), HoodieTableVersion.SIX);
     try {
       HoodieTableMetaClient.createTableLayoutOnStorage(context.getStorageConf(), new StoragePath(config.getBasePath()), config.getProps(), TimelineLayoutVersion.VERSION_2, false);
     } catch (IOException e) {
@@ -91,7 +98,6 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     }
 
     // handle table properties upgrade
-    Map<ConfigProperty, String> tablePropsToAdd = new HashMap<>();
     tablePropsToAdd.put(HoodieTableConfig.TIMELINE_PATH, HoodieTableConfig.TIMELINE_PATH.defaultValue());
     upgradePartitionFields(config, tableConfig, tablePropsToAdd);
     setInitialVersion(config, tableConfig, tablePropsToAdd);
@@ -139,9 +145,9 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
 
   static void setInitialVersion(HoodieWriteConfig config, HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
     if (tableConfig.contains(HoodieTableConfig.VERSION)) {
-      tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, tableConfig.getTableVersion().name());
+      tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, String.valueOf(tableConfig.getTableVersion().versionCode()));
     } else {
-      tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, HoodieTableVersion.SIX.name());
+      tablePropsToAdd.put(HoodieTableConfig.INITIAL_VERSION, String.valueOf(HoodieTableVersion.SIX.versionCode()));
     }
   }
 

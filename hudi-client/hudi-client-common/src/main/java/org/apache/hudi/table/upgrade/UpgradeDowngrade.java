@@ -60,13 +60,6 @@ public class UpgradeDowngrade {
 
   public boolean needsUpgradeOrDowngrade(HoodieTableVersion toWriteVersion) {
     HoodieTableVersion fromTableVersion = metaClient.getTableConfig().getTableVersion();
-
-    if (!config.autoUpgrade() && fromTableVersion.versionCode() < toWriteVersion.versionCode()) {
-      throw new HoodieUpgradeDowngradeException(String.format("Table version mismatch. "
-              + "Please upgrade table from version %s to %s. ", fromTableVersion, toWriteVersion));
-    }
-
-    // allow upgrades/downgrades otherwise.
     return toWriteVersion.versionCode() != fromTableVersion.versionCode();
   }
 
@@ -158,7 +151,11 @@ public class UpgradeDowngrade {
     for (Map.Entry<ConfigProperty, String> entry : tableProps.entrySet()) {
       metaClient.getTableConfig().setValue(entry.getKey(), entry.getValue());
     }
-    metaClient.getTableConfig().setTableVersion(toVersion);
+    // user could have disabled auto upgrade (probably to deploy the new binary only),
+    // in which case, we should not update the table version
+    if (config.autoUpgrade()) {
+      metaClient.getTableConfig().setTableVersion(toVersion);
+    }
 
     HoodieTableConfig.update(metaClient.getStorage(),
         metaClient.getMetaPath(), metaClient.getTableConfig().getProps());

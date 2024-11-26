@@ -96,7 +96,7 @@ public class TestSevenToEightUpgradeHandler {
       Object arg0 = i.getArguments()[0];
       if (arg0.equals(KeyGeneratorOptions.PARTITIONPATH_FIELD_NAME.key())) {
         return "partition_field";
-      } else if (arg0.equals(HoodieWriteConfig.RECORD_MERGE_MODE.key())){
+      } else if (arg0.equals(HoodieWriteConfig.RECORD_MERGE_MODE.key())) {
         return RecordMergeMode.EVENT_TIME_ORDERING.name();
       } else {
         return null;
