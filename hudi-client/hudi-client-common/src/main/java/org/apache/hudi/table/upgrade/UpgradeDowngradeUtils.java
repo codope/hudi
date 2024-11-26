@@ -69,6 +69,8 @@ public class UpgradeDowngradeUtils {
 
   /**
    * Utility method to run compaction for MOR table as part of downgrade step.
+   *
+   * @Deprecated Use {@link UpgradeDowngradeUtils#rollbackFailedWritesAndCompact(HoodieTable, HoodieEngineContext, HoodieWriteConfig, SupportsUpgradeDowngrade, boolean, HoodieTableVersion)} instead.
    */
   public static void runCompaction(HoodieTable table, HoodieEngineContext context, HoodieWriteConfig config,
                                    SupportsUpgradeDowngrade upgradeDowngradeHelper) {
@@ -161,10 +163,12 @@ public class UpgradeDowngradeUtils {
     try {
       // set required configs for rollback
       HoodieInstantTimeGenerator.setCommitTimeZone(table.getMetaClient().getTableConfig().getTimelineTimezone());
-      // NOTE: at this stage we just use the current writer version and disable auto upgrade/downgrade
-      config.setValue(HoodieWriteConfig.WRITE_TABLE_VERSION, String.valueOf(tableVersion.versionCode()));
-      config.setValue(HoodieWriteConfig.AUTO_UPGRADE_VERSION, "false");
-      HoodieWriteConfig rollbackWriteConfig = HoodieWriteConfig.newBuilder().withProps(config.getProps()).build();
+      // NOTE: at this stage rollback should use the current writer version and disable auto upgrade/downgrade
+      HoodieWriteConfig rollbackWriteConfig = HoodieWriteConfig.newBuilder()
+          .withProps(config.getProps())
+          .withWriteTableVersion(tableVersion.versionCode())
+          .withAutoUpgradeVersion(false)
+          .build();
       // set eager cleaning
       rollbackWriteConfig.setValue(HoodieCleanConfig.FAILED_WRITES_CLEANER_POLICY.key(), HoodieFailedWritesCleaningPolicy.EAGER.name());
       rollbackWriteConfig.setValue(HoodieWriteConfig.ROLLBACK_USING_MARKERS_ENABLE.key(), String.valueOf(config.shouldRollbackUsingMarkers()));
@@ -177,7 +181,7 @@ public class UpgradeDowngradeUtils {
       } else {
         rollbackWriteConfig.setValue(HoodieCompactionConfig.INLINE_COMPACT.key(), "false");
       }
-      rollbackWriteConfig.setValue(HoodieMetadataConfig.ENABLE.key(), String.valueOf(config.isMetadataTableEnabled()));
+      rollbackWriteConfig.setValue(HoodieMetadataConfig.ENABLE.key(), "false");
 
       try (BaseHoodieWriteClient writeClient = upgradeDowngradeHelper.getWriteClient(rollbackWriteConfig, context)) {
         writeClient.rollbackFailedWrites();

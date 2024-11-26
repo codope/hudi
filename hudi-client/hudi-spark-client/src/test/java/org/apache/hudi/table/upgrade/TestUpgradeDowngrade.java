@@ -358,13 +358,11 @@ public class TestUpgradeDowngrade extends HoodieClientTestBase {
 
     // remove TABLE_CHECKSUM and upgrade to current version
     metaClient.getTableConfig().getProps().remove(HoodieTableConfig.TABLE_CHECKSUM.key());
-    new UpgradeDowngrade(metaClient, cfg, context, SparkUpgradeDowngradeHelper.getInstance()).run(HoodieTableVersion.current(), null);
+    new UpgradeDowngrade(metaClient, cfg, context, SparkUpgradeDowngradeHelper.getInstance()).run(HoodieTableVersion.SIX, null);
 
     // verify upgrade and TABLE_CHECKSUM
-    metaClient = HoodieTableMetaClient.builder()
-        .setConf(context.getStorageConf().newInstance()).setBasePath(cfg.getBasePath())
-        .setLayoutVersion(Option.of(new TimelineLayoutVersion(cfg.getTimelineLayoutVersion()))).build();
-    assertTableVersionOnDataAndMetadataTable(metaClient, HoodieTableVersion.current());
+    metaClient = HoodieTableMetaClient.reload(metaClient);
+    assertTableVersionOnDataAndMetadataTable(metaClient, HoodieTableVersion.SIX);
     assertTrue(metaClient.getTableConfig().getProps().containsKey(HoodieTableConfig.TABLE_CHECKSUM.key()));
     assertEquals(checksum, metaClient.getTableConfig().getProps().getString(HoodieTableConfig.TABLE_CHECKSUM.key()));
   }

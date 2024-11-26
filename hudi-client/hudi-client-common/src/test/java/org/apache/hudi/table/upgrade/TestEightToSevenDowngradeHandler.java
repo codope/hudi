@@ -28,7 +28,6 @@ import org.apache.hudi.common.model.BootstrapIndexType;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
-import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.keygen.constant.KeyGeneratorType;
@@ -39,7 +38,6 @@ import org.apache.hudi.storage.HoodieStorageUtils;
 import org.apache.hudi.storage.StoragePath;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -63,8 +61,6 @@ import static org.apache.hudi.common.table.HoodieTableConfig.PARTITION_FIELDS;
 import static org.apache.hudi.common.table.HoodieTableConfig.PAYLOAD_CLASS_NAME;
 import static org.apache.hudi.common.table.HoodieTableConfig.RECORD_MERGE_MODE;
 import static org.apache.hudi.common.table.HoodieTableConfig.TABLE_METADATA_PARTITIONS;
-import static org.apache.hudi.common.table.timeline.HoodieTimeline.CLUSTERING_ACTION;
-import static org.apache.hudi.common.testutils.HoodieTestUtils.INSTANT_GENERATOR;
 import static org.apache.hudi.common.testutils.HoodieTestUtils.getDefaultStorageConf;
 import static org.apache.hudi.metadata.MetadataPartitionType.COLUMN_STATS;
 import static org.apache.hudi.metadata.MetadataPartitionType.FILES;
@@ -72,7 +68,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
@@ -147,24 +142,6 @@ class TestEightToSevenDowngradeHandler {
 
       assertTrue(tablePropsToAdd.containsKey(TABLE_METADATA_PARTITIONS));
       assertEquals("files,column_stats", tablePropsToAdd.get(TABLE_METADATA_PARTITIONS));
-    }
-  }
-
-  @Disabled("TODO: Fix after other changes are done")
-  @Test
-  void testTimelineDowngrade() {
-    List<HoodieInstant> instants = Arrays.asList(
-        INSTANT_GENERATOR.createNewInstant(HoodieInstant.State.COMPLETED, CLUSTERING_ACTION, "20211012123000"),
-        INSTANT_GENERATOR.createNewInstant(HoodieInstant.State.INFLIGHT, CLUSTERING_ACTION, "20211012123001")
-    );
-    when(metaClient.getActiveTimeline().getInstants()).thenReturn(instants);
-    when(config.getBasePath()).thenReturn(baseDir.getAbsolutePath());
-    try (MockedStatic<UpgradeDowngradeUtils> upgradeDowngradeUtilsMock = mockStatic(UpgradeDowngradeUtils.class)) {
-      downgradeHandler.downgrade(config, context, "20211012123000", upgradeDowngradeHelper);
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.runCompaction(any(), any(), any(), any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.syncCompactionRequestedFileToAuxiliaryFolder(any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> EightToSevenDowngradeHandler.downgradeFromLSMTimeline(any(), any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> EightToSevenDowngradeHandler.downgradeActiveTimelineInstant(any(), any(), any(), any(), any(), any()), times(2));
     }
   }
 

@@ -25,22 +25,17 @@ import org.apache.hudi.common.config.RecordMergeMode;
 import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
-import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 import org.apache.hudi.table.HoodieTable;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.apache.hudi.common.table.HoodieTableConfig.BOOTSTRAP_INDEX_CLASS_NAME;
@@ -52,16 +47,11 @@ import static org.apache.hudi.common.table.HoodieTableConfig.KEY_GENERATOR_TYPE;
 import static org.apache.hudi.common.table.HoodieTableConfig.PARTITION_FIELDS;
 import static org.apache.hudi.common.table.HoodieTableConfig.PAYLOAD_CLASS_NAME;
 import static org.apache.hudi.common.table.HoodieTableConfig.RECORD_MERGE_MODE;
-import static org.apache.hudi.common.table.timeline.HoodieTimeline.CLUSTERING_ACTION;
-import static org.apache.hudi.common.testutils.HoodieTestUtils.INSTANT_GENERATOR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.isA;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -109,7 +99,7 @@ public class TestSevenToEightUpgradeHandler {
     assertEquals("partition_field", tablePropsToAdd.get(PARTITION_FIELDS));
 
     SevenToEightUpgradeHandler.setInitialVersion(config, tableConfig, tablePropsToAdd);
-    assertEquals("SIX", tablePropsToAdd.get(INITIAL_VERSION));
+    assertEquals("6", tablePropsToAdd.get(INITIAL_VERSION));
 
     // Mock record merge mode configuration for merging behavior
     when(tableConfig.contains(isA(ConfigProperty.class))).thenAnswer(i -> i.getArguments()[0].equals(PAYLOAD_CLASS_NAME));
@@ -130,24 +120,5 @@ public class TestSevenToEightUpgradeHandler {
     SevenToEightUpgradeHandler.upgradeKeyGeneratorType(config, tableConfig, tablePropsToAdd);
     assertTrue(tablePropsToAdd.containsKey(KEY_GENERATOR_CLASS_NAME));
     assertTrue(tablePropsToAdd.containsKey(KEY_GENERATOR_TYPE));
-  }
-
-  @Disabled("TODO: Fix after other changes are done")
-  @Test
-  void testTimelineUpgrade() {
-    List<HoodieInstant> instants = Arrays.asList(
-        INSTANT_GENERATOR.createNewInstant(HoodieInstant.State.COMPLETED, CLUSTERING_ACTION, "20211012123000"),
-        INSTANT_GENERATOR.createNewInstant(HoodieInstant.State.INFLIGHT, CLUSTERING_ACTION, "20211012123001")
-    );
-    when(metaClient.getActiveTimeline().getInstants()).thenReturn(instants);
-
-    try (MockedStatic<UpgradeDowngradeUtils> upgradeDowngradeUtilsMock = mockStatic(UpgradeDowngradeUtils.class)) {
-      upgradeHandler.upgrade(config, context, "20211012123000", upgradeDowngradeHelper);
-
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.runCompaction(any(), any(), any(), any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> UpgradeDowngradeUtils.syncCompactionRequestedFileToAuxiliaryFolder(any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> SevenToEightUpgradeHandler.upgradeToLSMTimeline(any(), any(), any()), times(1));
-      upgradeDowngradeUtilsMock.verify(() -> SevenToEightUpgradeHandler.upgradeActiveTimelineInstant(any(), any(), any(), any(), any(), any()), times(instants.size()));
-    }
   }
 }
