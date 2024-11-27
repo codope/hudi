@@ -35,6 +35,7 @@ import org.apache.hudi.common.table.timeline.HoodieArchivedTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
 import org.apache.hudi.common.table.timeline.InstantFileNameGenerator;
+import org.apache.hudi.common.table.timeline.MetadataConversionUtils;
 import org.apache.hudi.common.table.timeline.versioning.TimelineLayoutVersion;
 import org.apache.hudi.common.table.timeline.versioning.v1.ActiveTimelineV1;
 import org.apache.hudi.common.table.timeline.versioning.v1.CommitMetadataSerDeV1;
@@ -198,7 +199,7 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
       TimelineArchiverV1 archiver = (TimelineArchiverV1) TimelineArchivers.getInstance(TimelineLayoutVersion.LAYOUT_VERSION_1, config, table);
       int batchSize = config.getCommitArchivalBatchSize();
       StoragePath archivePath = new StoragePath(table.getMetaClient().getMetaPath(), "archived");
-      try (ArchiveEntryFlusher flusher = new ArchiveEntryFlusher(archiver, batchSize, archivePath)) {
+      try (ArchiveEntryFlusher flusher = new ArchiveEntryFlusher(table.getMetaClient(), archiver, batchSize, archivePath)) {
         // Load and process instants in the batch
         ArchivedTimelineLoader timelineLoader = new ArchivedTimelineLoaderV2();
         timelineLoader.loadInstants(
@@ -224,8 +225,10 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
     private final List<GenericRecord> buffer;
     private final int batchSize;
     private final StoragePath archivePath;
+    private final HoodieTableMetaClient metaClient;
 
-    public ArchiveEntryFlusher(TimelineArchiverV1 archiverV1, int batchSize, StoragePath archivePath) {
+    public ArchiveEntryFlusher(HoodieTableMetaClient metaClient, TimelineArchiverV1 archiverV1, int batchSize, StoragePath archivePath) {
+      this.metaClient = metaClient;
       this.archiverV1 = archiverV1;
       this.batchSize = batchSize;
       this.buffer = new ArrayList<>();
@@ -238,9 +241,12 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
         archiverV1.flushArchiveEntries(new ArrayList<>(buffer), archivePath);
         buffer.clear();
       } else {
-        // TODO: we need to convert the HoodieLSMTimelineInstant back to HoodieArchivedMetaEntry before flushing.
-        // Caution that the encode has been changed (from json to avro) for plan and commit metadata.
-        buffer.add(archiveEntry);
+        try {
+          GenericRecord legacyArchiveEntry = MetadataConversionUtils.createMetaWrapper(metaClient, archiveEntry);
+          buffer.add(legacyArchiveEntry);
+        } catch (IOException e) {
+          throw new HoodieException("Convert lsm archive entry to legacy error", e);
+        }
       }
     }
 
