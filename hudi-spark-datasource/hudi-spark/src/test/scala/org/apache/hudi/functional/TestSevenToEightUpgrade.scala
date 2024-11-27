@@ -20,8 +20,11 @@ package org.apache.hudi.functional
 
 import org.apache.hudi.DataSourceWriteOptions
 import org.apache.hudi.DataSourceWriteOptions.{PRECOMBINE_FIELD_OPT_KEY, RECORDKEY_FIELD_OPT_KEY}
+import org.apache.hudi.common.config.HoodieMetadataConfig
 import org.apache.hudi.common.model.HoodieTableType
 import org.apache.hudi.common.table.{HoodieTableConfig, HoodieTableMetaClient, HoodieTableVersion}
+import org.apache.hudi.common.testutils.HoodieTestUtils
+import org.apache.hudi.config.{HoodieArchivalConfig, HoodieCleanConfig, HoodieCompactionConfig, HoodieWriteConfig}
 import org.apache.hudi.keygen.constant.KeyGeneratorType
 import org.apache.hudi.table.upgrade.{SparkUpgradeDowngradeHelper, UpgradeDowngrade}
 import org.apache.spark.sql.SaveMode
@@ -74,10 +77,10 @@ class TestSevenToEightUpgrade extends RecordLevelIndexTestBase {
   }
 
   @Test
-  @Disabled("Only for local testing, will clean it up")
+  //@Disabled("Only for local testing, will clean it up")
   def testDowngradeTable(): Unit = {
     val tableName = "trips_table"
-    val basePath = "file:///tmp/trips_table_mor"
+    val basePath = "file:///tmp/trips_table_mor_arch"
     val tableType = "MERGE_ON_READ"
     // spark-shell
     /*val columns = Seq("ts","uuid","rider","driver","fare","city")
@@ -115,10 +118,33 @@ class TestSevenToEightUpgrade extends RecordLevelIndexTestBase {
       option(PRECOMBINE_FIELD_OPT_KEY, "ts").
       option(RECORDKEY_FIELD_OPT_KEY, "uuid").
       option("hoodie.metadata.enable", "false").
-      option("hoodie.write.auto.upgrade", "false"). // Disable auto upgrade
+      //option("hoodie.write.auto.upgrade", "false"). // Disable auto upgrade
+      option("hoodie.keep.min.commits", "1").
+      option("hoodie.keep.max.commits", "2").
+      option("hoodie.cleaner.commits.retained", "1").
+      option("hoodie.compact.inline", "true").
+      option("hoodie.compact.inline.max.delta.commits", "2").
       mode(SaveMode.Append).
       save(basePath)
     // check data
-    spark.sql("SELECT uuid, fare, ts, rider, driver, city FROM  trips_table WHERE fare > 20.0").show()
+    spark.sql("SELECT uuid, ts, rider, driver, city FROM  trips_table WHERE rider = 'rider-J'").show()
+
+    // downgrade to version SIX
+    metaClient = HoodieTableMetaClient.builder()
+      .setConf(HoodieTestUtils.getDefaultStorageConf)
+      .setBasePath(basePath)
+      .build()
+    val writeConfig = HoodieWriteConfig.newBuilder()
+      .withPath(basePath)
+      .withCleanConfig(HoodieCleanConfig.newBuilder().retainCommits(1).build())
+      .withCompactionConfig(HoodieCompactionConfig.newBuilder().withInlineCompaction(true).withMaxNumDeltaCommitsBeforeCompaction(2).build())
+      .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(1, 2).build())
+      .withMetadataConfig(HoodieMetadataConfig.newBuilder().enable(false).build())
+      .build()
+    new UpgradeDowngrade(metaClient, writeConfig, context, SparkUpgradeDowngradeHelper.getInstance)
+      .run(HoodieTableVersion.SIX, null)
+    metaClient = HoodieTableMetaClient.reload(metaClient)
+    assertEquals(HoodieTableVersion.SIX, metaClient.getTableConfig.getTableVersion)
+    assertEquals("partition", HoodieTableConfig.getPartitionFieldPropForKeyGenerator(metaClient.getTableConfig).get())
   }
 }

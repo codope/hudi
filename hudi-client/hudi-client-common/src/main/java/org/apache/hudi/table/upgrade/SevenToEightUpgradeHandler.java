@@ -24,8 +24,10 @@ import org.apache.hudi.common.config.ConfigProperty;
 import org.apache.hudi.common.config.RecordMergeMode;
 import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.model.BootstrapIndexType;
+import org.apache.hudi.common.model.DefaultHoodieRecordPayload;
 import org.apache.hudi.common.model.HoodieCommitMetadata;
 import org.apache.hudi.common.model.HoodieTableType;
+import org.apache.hudi.common.model.OverwriteWithLatestAvroPayload;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
@@ -100,8 +102,8 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     // handle table properties upgrade
     tablePropsToAdd.put(HoodieTableConfig.TIMELINE_PATH, HoodieTableConfig.TIMELINE_PATH.defaultValue());
     upgradePartitionFields(config, tableConfig, tablePropsToAdd);
+    upgradeMergeMode(tableConfig, tablePropsToAdd);
     setInitialVersion(config, tableConfig, tablePropsToAdd);
-    setRecordMergeMode(config, tableConfig, tablePropsToAdd);
     upgradeKeyGeneratorType(config, tableConfig, tablePropsToAdd);
     upgradeBootstrapIndexType(config, tableConfig, tablePropsToAdd);
 
@@ -165,6 +167,24 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     }
   }
 
+  private static void upgradeMergeMode(HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
+    if (tableConfig.getPayloadClass() != null
+        && tableConfig.getPayloadClass().equals(OverwriteWithLatestAvroPayload.class.getName())) {
+      if (HoodieTableType.COPY_ON_WRITE == tableConfig.getTableType()) {
+        tablePropsToAdd.put(
+            HoodieTableConfig.RECORD_MERGE_MODE,
+            RecordMergeMode.COMMIT_TIME_ORDERING.name());
+      } else {
+        tablePropsToAdd.put(
+            HoodieTableConfig.PAYLOAD_CLASS_NAME,
+            DefaultHoodieRecordPayload.class.getName());
+        tablePropsToAdd.put(
+            HoodieTableConfig.RECORD_MERGE_MODE,
+            RecordMergeMode.EVENT_TIME_ORDERING.name());
+      }
+    }
+  }
+
   static void upgradeBootstrapIndexType(HoodieWriteConfig config, HoodieTableConfig tableConfig, Map<ConfigProperty, String> tablePropsToAdd) {
     if (tableConfig.contains(HoodieTableConfig.BOOTSTRAP_INDEX_CLASS_NAME) || tableConfig.contains(HoodieTableConfig.BOOTSTRAP_INDEX_TYPE)) {
       String bootstrapIndexClass = BootstrapIndexType.getBootstrapIndexClassName(tableConfig);
@@ -190,8 +210,8 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
     try {
       LegacyArchivedMetaEntryReader reader = new LegacyArchivedMetaEntryReader(table.getMetaClient());
       ClosableIterator<ActiveAction> iterator = reader.getActiveActionsIterator();
-      LSMTimelineWriter lsmTimelineWriter = LSMTimelineWriter.getInstance(config, table);
       StoragePath archivePath = new StoragePath(table.getMetaClient().getMetaPath(), "timeline/history");
+      LSMTimelineWriter lsmTimelineWriter = LSMTimelineWriter.getInstance(config, table, Option.of(archivePath));
       int batchSize = config.getCommitArchivalBatchSize();
       List<ActiveAction> activeActionsBatch = new ArrayList<>(batchSize);
       try {
@@ -199,7 +219,7 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
           activeActionsBatch.add(iterator.next());
           // If the batch is full, write it to the LSM timeline
           if (activeActionsBatch.size() == batchSize) {
-            lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty(), archivePath);
+            lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty());
             lsmTimelineWriter.compactAndClean(engineContext);
             activeActionsBatch.clear();
           }

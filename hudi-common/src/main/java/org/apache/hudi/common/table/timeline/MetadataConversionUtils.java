@@ -32,7 +32,6 @@ import org.apache.hudi.common.model.HoodieReplaceCommitMetadata;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
 import org.apache.hudi.common.table.timeline.versioning.v2.ArchivedTimelineV2;
-import org.apache.hudi.common.table.timeline.versioning.v2.CommitMetadataSerDeV2;
 import org.apache.hudi.common.util.CleanerUtils;
 import org.apache.hudi.common.util.CompactionUtils;
 import org.apache.hudi.common.util.JsonUtils;
@@ -47,12 +46,10 @@ import org.apache.avro.io.DatumWriter;
 import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.avro.specific.SpecificRecordBase;
-import org.apache.zookeeper.Op;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.function.Function;
 
 /**
  * Helper class to convert between different action related payloads and {@link HoodieArchivedMetaEntry}.
