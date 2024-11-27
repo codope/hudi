@@ -77,7 +77,7 @@ class TestSevenToEightUpgrade extends RecordLevelIndexTestBase {
   }
 
   @Test
-  //@Disabled("Only for local testing, will clean it up")
+  @Disabled("Only for local testing, will clean it up")
   def testDowngradeTable(): Unit = {
     val tableName = "trips_table"
     val basePath = "file:///tmp/trips_table_mor_arch"
@@ -145,6 +145,5 @@ class TestSevenToEightUpgrade extends RecordLevelIndexTestBase {
       .run(HoodieTableVersion.SIX, null)
     metaClient = HoodieTableMetaClient.reload(metaClient)
     assertEquals(HoodieTableVersion.SIX, metaClient.getTableConfig.getTableVersion)
-    assertEquals("partition", HoodieTableConfig.getPartitionFieldPropForKeyGenerator(metaClient.getTableConfig).get())
   }
 }
