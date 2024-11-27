@@ -628,9 +628,9 @@ public class TestHoodieTimelineArchiver extends HoodieSparkClientTestHarness {
     }
 
     // create a version pointer file with invalid version number.
-    metaClient.getStorage().deleteDirectory(LSMTimeline.getVersionFilePath(metaClient));
+    metaClient.getStorage().deleteDirectory(LSMTimeline.getVersionFilePath(metaClient.getArchivePath()));
     FileIOUtils.createFileInPath(metaClient.getStorage(),
-        LSMTimeline.getVersionFilePath(metaClient), Option.of(getUTF8Bytes("invalid_version")));
+        LSMTimeline.getVersionFilePath(metaClient.getArchivePath()), Option.of(getUTF8Bytes("invalid_version")));
 
     // check that invalid manifest file will not block archived timeline loading.
     HoodieActiveTimeline rawActiveTimeline = TIMELINE_FACTORY.createActiveTimeline(metaClient, false);

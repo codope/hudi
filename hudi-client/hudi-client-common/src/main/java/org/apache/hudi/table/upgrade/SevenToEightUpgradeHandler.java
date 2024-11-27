@@ -209,12 +209,11 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
             "Upgrade to LSM timeline is only supported for layout version 1. Given version: " + timelineLayoutVersion));
     try {
       LegacyArchivedMetaEntryReader reader = new LegacyArchivedMetaEntryReader(table.getMetaClient());
-      ClosableIterator<ActiveAction> iterator = reader.getActiveActionsIterator();
       StoragePath archivePath = new StoragePath(table.getMetaClient().getMetaPath(), "timeline/history");
       LSMTimelineWriter lsmTimelineWriter = LSMTimelineWriter.getInstance(config, table, Option.of(archivePath));
       int batchSize = config.getCommitArchivalBatchSize();
       List<ActiveAction> activeActionsBatch = new ArrayList<>(batchSize);
-      try {
+      try (ClosableIterator<ActiveAction> iterator = reader.getActiveActionsIterator()) {
         while (iterator.hasNext()) {
           activeActionsBatch.add(iterator.next());
           // If the batch is full, write it to the LSM timeline
@@ -230,8 +229,6 @@ public class SevenToEightUpgradeHandler implements UpgradeHandler {
           lsmTimelineWriter.write(new ArrayList<>(activeActionsBatch), Option.empty(), Option.empty());
           lsmTimelineWriter.compactAndClean(engineContext);
         }
-      } finally {
-        iterator.close();
       }
     } catch (Exception e) {
       if (config.isFailOnTimelineArchivingEnabled()) {

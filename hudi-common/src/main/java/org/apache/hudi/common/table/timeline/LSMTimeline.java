@@ -148,7 +148,7 @@ public class LSMTimeline {
    * Returns the latest snapshot version.
    */
   public static int latestSnapshotVersion(HoodieTableMetaClient metaClient, StoragePath archivePath) throws IOException {
-    StoragePath versionFilePath = getVersionFilePath(metaClient);
+    StoragePath versionFilePath = getVersionFilePath(archivePath);
     if (metaClient.getStorage().exists(versionFilePath)) {
       try {
         Option<byte[]> content =
@@ -216,25 +216,25 @@ public class LSMTimeline {
   /**
    * Returns the full version file path with given version number.
    */
-  public static StoragePath getVersionFilePath(HoodieTableMetaClient metaClient) {
-    return new StoragePath(metaClient.getArchivePath(), VERSION_FILE_NAME);
+  public static StoragePath getVersionFilePath(StoragePath archivePath) {
+    return new StoragePath(archivePath, VERSION_FILE_NAME);
   }
 
   /**
    * List all the parquet manifest files.
    */
-  public static List<StoragePathInfo> listAllManifestFiles(HoodieTableMetaClient metaClient)
+  public static List<StoragePathInfo> listAllManifestFiles(HoodieTableMetaClient metaClient, StoragePath archivePath)
       throws IOException {
     return metaClient.getStorage().listDirectEntries(
-        metaClient.getArchivePath(), getManifestFilePathFilter());
+        archivePath, getManifestFilePathFilter());
   }
 
   /**
    * List all the parquet metadata files.
    */
-  public static List<StoragePathInfo> listAllMetaFiles(HoodieTableMetaClient metaClient) throws IOException {
+  public static List<StoragePathInfo> listAllMetaFiles(HoodieTableMetaClient metaClient, StoragePath archivePath) throws IOException {
     return metaClient.getStorage().globEntries(
-        new StoragePath(metaClient.getArchivePath(), "*.parquet"));
+        new StoragePath(archivePath, "*.parquet"));
   }
 
   /**

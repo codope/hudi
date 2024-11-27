@@ -116,24 +116,8 @@ public class LSMTimelineWriter {
       List<ActiveAction> activeActions,
       Option<Consumer<ActiveAction>> preWriteCallback,
       Option<Consumer<Exception>> exceptionHandler) throws HoodieCommitException {
-    write(activeActions, preWriteCallback, exceptionHandler, archivePath);
-  }
-
-  /**
-   * Writes the list of active actions into the timeline.
-   *
-   * @param activeActions    The active actions
-   * @param preWriteCallback The callback before writing each action
-   * @param exceptionHandler The handle for exception
-   * @param archivePath      The explicit archive path
-   */
-  private void write(
-      List<ActiveAction> activeActions,
-      Option<Consumer<ActiveAction>> preWriteCallback,
-      Option<Consumer<Exception>> exceptionHandler,
-      StoragePath archivePath) throws HoodieCommitException {
     ValidationUtils.checkArgument(!activeActions.isEmpty(), "The instant actions to write should not be empty");
-    StoragePath filePath = new StoragePath(archivePath,
+    StoragePath filePath = new StoragePath(this.archivePath,
         newFileName(activeActions.get(0).getInstantTime(), activeActions.get(activeActions.size() - 1).getInstantTime(), FILE_LAYER_ZERO));
     try (HoodieFileWriter writer = openWriter(filePath)) {
       Schema wrapperSchema = HoodieLSMTimelineInstant.getClassSchema();
@@ -210,7 +194,7 @@ public class LSMTimelineWriter {
 
   private void updateVersionFile(int newVersion) throws IOException {
     byte[] content = getUTF8Bytes(String.valueOf(newVersion));
-    final StoragePath versionFilePath = LSMTimeline.getVersionFilePath(metaClient);
+    final StoragePath versionFilePath = LSMTimeline.getVersionFilePath(archivePath);
     metaClient.getStorage().deleteFile(versionFilePath);
     metaClient.getStorage().createImmutableFileInPath(versionFilePath, Option.of(content));
   }
@@ -329,7 +313,7 @@ public class LSMTimelineWriter {
           .collect(Collectors.toSet());
       // delete the manifest file first
       List<String> manifestFilesToClean = new ArrayList<>();
-      LSMTimeline.listAllManifestFiles(metaClient).forEach(fileStatus -> {
+      LSMTimeline.listAllManifestFiles(metaClient, archivePath).forEach(fileStatus -> {
         if (!versionsToKeep.contains(
             LSMTimeline.getManifestVersion(fileStatus.getPath().getName()))) {
           manifestFilesToClean.add(fileStatus.getPath().toString());
@@ -338,7 +322,7 @@ public class LSMTimelineWriter {
       HadoopFSUtils.deleteFilesParallelize(metaClient, manifestFilesToClean, context, config.getArchiveDeleteParallelism(),
           false);
       // delete the data files
-      List<String> dataFilesToClean = LSMTimeline.listAllMetaFiles(metaClient).stream()
+      List<String> dataFilesToClean = LSMTimeline.listAllMetaFiles(metaClient, archivePath).stream()
           .filter(fileStatus -> !filesToKeep.contains(fileStatus.getPath().getName()))
           .map(fileStatus -> fileStatus.getPath().toString())
           .collect(Collectors.toList());
