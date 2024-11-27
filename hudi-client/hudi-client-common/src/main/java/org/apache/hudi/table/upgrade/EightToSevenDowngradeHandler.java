@@ -205,7 +205,7 @@ public class EightToSevenDowngradeHandler implements DowngradeHandler {
         timelineLoader.loadInstants(
             table.getMetaClient(),
             null,
-            HoodieArchivedTimeline.LoadMode.PLAN,
+            HoodieArchivedTimeline.LoadMode.FULL,
             record -> true,
             flusher);
       }

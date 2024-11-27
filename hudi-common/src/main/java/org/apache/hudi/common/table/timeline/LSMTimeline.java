@@ -128,6 +128,8 @@ public class LSMTimeline {
         return ArchivedInstantReadSchemas.TIMELINE_LSM_READ_SCHEMA_WITH_METADATA;
       case PLAN:
         return ArchivedInstantReadSchemas.TIMELINE_LSM_READ_SCHEMA_WITH_PLAN;
+      case FULL:
+        return ArchivedInstantReadSchemas.TIMELINE_LSM_READ_SCHEMA_AS_FULL;
       default:
         throw new AssertionError("Unexpected");
     }

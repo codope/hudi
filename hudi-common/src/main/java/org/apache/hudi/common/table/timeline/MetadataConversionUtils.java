@@ -193,7 +193,6 @@ public class MetadataConversionUtils {
           // this should be a compaction
           HoodieCompactionPlan plan = CompactionUtils.getCompactionPlan(metaClient, planBytes);
           archivedMetaWrapper.setHoodieCompactionPlan(plan);
-          archivedMetaWrapper.setActionType(ActionType.compaction.name());
         }
         break;
       }
@@ -206,7 +205,6 @@ public class MetadataConversionUtils {
           // this should be a log compaction
           HoodieCompactionPlan plan = CompactionUtils.getCompactionPlan(metaClient, planBytes);
           archivedMetaWrapper.setHoodieCompactionPlan(plan);
-          archivedMetaWrapper.setActionType(ActionType.logcompaction.name());
         }
         break;
       }
