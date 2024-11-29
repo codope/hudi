@@ -180,7 +180,7 @@ public class ClusteringUtils {
     } else if (pendingReplaceOrClusterInstant.isRequested()) {
       requestedInstant = pendingReplaceOrClusterInstant;
     } else {
-      requestedInstant = factory.createNewInstant(HoodieInstant.State.REQUESTED, HoodieTimeline.CLUSTERING_ACTION, pendingReplaceOrClusterInstant.requestedTime());
+      requestedInstant = factory.createNewInstant(HoodieInstant.State.REQUESTED, pendingReplaceOrClusterInstant.getAction(), pendingReplaceOrClusterInstant.requestedTime());
     }
     Option<byte[]> content = Option.empty();
     try {
