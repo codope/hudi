@@ -83,7 +83,7 @@ jobs:
     # if: false
     env:
       HUDI_VERSION: 1.0.0
-      MAVEN_BASE_URL: 'https://repo1.maven.org/maven2/org/apache/hudi'
+      MAVEN_BASE_URL: 'https://repo1.maven.org/maven2'
     strategy:
       matrix:
         include:
@@ -123,7 +123,7 @@ jobs:
           SPARK_RUNTIME: ${{ matrix.sparkRuntime }}
           SCALA_PROFILE: ${{ matrix.scalaProfile }}
         run: |
-          ./packaging/bundle-validation/ci_maven.sh hudi_docker_java8 $HUDI_VERSION openjdk8 $MAVEN_BASE_URL
+          ./packaging/bundle-validation/ci_run.sh hudi_docker_java8 $HUDI_VERSION openjdk8 "" $MAVEN_BASE_URL
       - name: IT - Bundle Validation - OpenJDK 11
         env:
           FLINK_PROFILE: ${{ matrix.flinkProfile }}
@@ -132,7 +132,7 @@ jobs:
           SCALA_PROFILE: ${{ matrix.scalaProfile }}
         if: ${{ env.SPARK_PROFILE >= 'spark3' }} # Only run validation on Spark 3
         run: |
-          ./packaging/bundle-validation/ci_maven.sh hudi_docker_java11 $HUDI_VERSION openjdk11 $MAVEN_BASE_URL
+          ./packaging/bundle-validation/ci_run.sh hudi_docker_java11 $HUDI_VERSION openjdk11 "" $MAVEN_BASE_URL
       - name: IT - Bundle Validation - OpenJDK 17
         env:
           FLINK_PROFILE: ${{ matrix.flinkProfile }}
@@ -141,4 +141,4 @@ jobs:
           SCALA_PROFILE: ${{ matrix.scalaProfile }}
         if: ${{ env.SPARK_PROFILE >= 'spark3.3' }} # Only Spark 3.3 and above support Java 17
         run: |
-          ./packaging/bundle-validation/ci_maven.sh hudi_docker_java17 $HUDI_VERSION openjdk17 $MAVEN_BASE_URL
+          ./packaging/bundle-validation/ci_run.sh hudi_docker_java17 $HUDI_VERSION openjdk17 "" $MAVEN_BASE_URL
