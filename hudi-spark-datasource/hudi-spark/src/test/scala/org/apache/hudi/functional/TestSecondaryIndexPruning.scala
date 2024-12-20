@@ -1048,6 +1048,11 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
     // delete for same key that was just updated
     spark.sql(s"delete from $tableName where record_key_col = 'row2'")
 
+    checkAnswer(s"select key, SecondaryIndexMetadata.isDeleted from hudi_metadata('$basePath') where type=7")(
+      Seq(s"abc${SECONDARY_INDEX_RECORD_KEY_SEPARATOR}row1", false),
+      Seq(s"xyz1${SECONDARY_INDEX_RECORD_KEY_SEPARATOR}row3", false)
+    )
+
     // validate data skipping with filters on secondary key column
     spark.sql("set hoodie.metadata.enable=true")
     spark.sql("set hoodie.enable.data.skipping=true")

@@ -85,6 +85,8 @@ import static org.apache.hudi.metadata.HoodieTableMetadataUtil.PARTITION_NAME_BL
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.PARTITION_NAME_COLUMN_STATS;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.PARTITION_NAME_FILES;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getFileSystemView;
+import static org.apache.hudi.metadata.SecondaryIndexKeyUtils.getRecordKeyFromSecondaryIndexKey;
+import static org.apache.hudi.metadata.SecondaryIndexKeyUtils.getSecondaryKeyFromSecondaryIndexKey;
 
 /**
  * Table metadata provided by an internal DFS backed Hudi metadata table.
@@ -839,15 +841,21 @@ public class HoodieBackedTableMetadata extends BaseTableMetadata {
       Set<String> deletedRecordsFromLogs = new HashSet<>();
       // Map of recordKey (primaryKey) -> log record that is not deleted for all input recordKeys
       Map<String, HoodieRecord<HoodieMetadataPayload>> logRecordsMap = new HashMap<>();
+      /**
+       * r1 -> s1: s1$r1, false - bf1
+       * r1 -> s2: s2$r1, false, s1$r1, true  - lf1
+       * r1 -> s3: s3$r1, false, s1$r1, true  - lf2
+       * delete r1
+       */
       logRecordScanner.getRecords().forEach(record -> {
-        String recordKey = SecondaryIndexKeyUtils.getRecordKeyFromSecondaryIndexKey(record.getRecordKey());
+        String recordKey = getRecordKeyFromSecondaryIndexKey(record.getRecordKey());
         HoodieMetadataPayload payload = record.getData();
         if (!payload.isDeleted()) { // process only valid records.
           if (keySet.contains(recordKey)) {
-            logRecordsMap.put(recordKey, record);
+            logRecordsMap.put(record.getRecordKey(), record);
           }
         } else {
-          deletedRecordsFromLogs.add(recordKey);
+          deletedRecordsFromLogs.add(record.getRecordKey());
         }
       });
 
@@ -856,7 +864,7 @@ public class HoodieBackedTableMetadata extends BaseTableMetadata {
       if (baseFileRecords == null || baseFileRecords.isEmpty()) {
         logRecordsMap.forEach((key1, value1) -> {
           if (!value1.getData().isDeleted()) {
-            recordKeyMap.put(key1, SecondaryIndexKeyUtils.getSecondaryKeyFromSecondaryIndexKey(value1.getRecordKey()));
+            recordKeyMap.put(getRecordKeyFromSecondaryIndexKey(value1.getRecordKey()), getSecondaryKeyFromSecondaryIndexKey(value1.getRecordKey()));
           }
         });
       } else {
@@ -867,7 +875,7 @@ public class HoodieBackedTableMetadata extends BaseTableMetadata {
         }));
         baseFileRecords.forEach((key, value) -> {
           if (!deletedRecordsFromLogs.contains(key)) {
-            recordKeyMap.put(key, SecondaryIndexKeyUtils.getSecondaryKeyFromSecondaryIndexKey(value.getRecordKey()));
+            recordKeyMap.put(getRecordKeyFromSecondaryIndexKey(value.getRecordKey()), getSecondaryKeyFromSecondaryIndexKey(value.getRecordKey()));
           }
         });
       }
@@ -890,8 +898,8 @@ public class HoodieBackedTableMetadata extends BaseTableMetadata {
     return getRecordsByKeyPrefixes(keys, partitionName, false).map(
             record -> {
               if (!record.getData().isDeleted()) {
-                String recordKey = SecondaryIndexKeyUtils.getRecordKeyFromSecondaryIndexKey(record.getRecordKey());
-                String secondaryKey = SecondaryIndexKeyUtils.getSecondaryKeyFromSecondaryIndexKey(record.getRecordKey());
+                String recordKey = getRecordKeyFromSecondaryIndexKey(record.getRecordKey());
+                String secondaryKey = getSecondaryKeyFromSecondaryIndexKey(record.getRecordKey());
                 return Pair.of(secondaryKey, recordKey);
               }
               return null;
@@ -913,10 +921,6 @@ public class HoodieBackedTableMetadata extends BaseTableMetadata {
     return toStream(recordIterator).map(record -> {
       GenericRecord data = (GenericRecord) record.getData();
       return composeRecord(data, partitionName);
-    }).filter(record -> {
-      return keySet.contains(SecondaryIndexKeyUtils.getRecordKeyFromSecondaryIndexKey(record.getRecordKey()));
-    }).collect(Collectors.toMap(record -> {
-      return SecondaryIndexKeyUtils.getRecordKeyFromSecondaryIndexKey(record.getRecordKey());
-    }, record -> record));
+    }).filter(record -> keySet.contains(getRecordKeyFromSecondaryIndexKey(record.getRecordKey()))).collect(Collectors.toMap(HoodieRecord::getRecordKey, record -> record));
   }
 }
