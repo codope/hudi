@@ -828,62 +828,7 @@ public class HoodieTableMetadataUtil {
                   .map(logFile -> new StoragePath(new StoragePath(dataTableMetaClient.getBasePath(), writeStat.getPartitionPath()), logFile).toString())
                   .collect(toList());
 
-              // Separate out the current log file
-              List<String> logFilePathsWithoutCurrentLogFile = logFilePaths.stream()
-                  .filter(logFilePath -> !logFilePath.equals(fullFilePath.toString()))
-                  .collect(toList());
-
-              if (logFilePathsWithoutCurrentLogFile.isEmpty()) {
-                // Only current log file is present, so we can directly get the deleted record keys from it and return the RLI records.
-                Map<String, HoodieRecord> currentLogRecords =
-                    getLogRecords(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
-                Set<String> deletedKeysInCurrentLog = currentLogRecords.entrySet().stream()
-                    .filter(entry -> entry.getValue().getCurrentLocation() == null && entry.getValue().getNewLocation() == null)
-                    .map(Map.Entry::getKey)
-                    .collect(Collectors.toSet());
-
-                return deletedKeysInCurrentLog.isEmpty()
-                    ? Collections.emptyIterator()
-                    : deletedKeysInCurrentLog.stream().map(HoodieMetadataPayload::createRecordIndexDelete).collect(toList()).iterator();
-              }
-
-              // Now, there are previous log files present. We need to merge them and get the deleted record keys as oer below logic. Let:
-              // A = Set of keys that are valid (not deleted) in the previous log files merged
-              // B = Set of keys that are valid in all log files including current log file merged
-              // C = Set of keys that are deleted in the current log file
-              // Finally compute, D = Set of deleted keys = C - (B - A)
-
-              // Fetch log records for all log files
-              Map<String, HoodieRecord> allLogRecords =
-                  getLogRecords(logFilePaths, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
-
-              // Fetch log records for previous log files (excluding the current log file)
-              Map<String, HoodieRecord> previousLogRecords =
-                  getLogRecords(logFilePathsWithoutCurrentLogFile, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
-
-              // Fetch log records for the current log file
-              Map<String, HoodieRecord> currentLogRecords =
-                  getLogRecords(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
-
-              // Calculate valid (non-deleted) keys
-              Set<String> validKeysForPreviousLogs = previousLogRecords.entrySet().stream()
-                  .filter(entry -> !(entry.getValue().getCurrentLocation() == null && entry.getValue().getNewLocation() == null))
-                  .map(Map.Entry::getKey)
-                  .collect(Collectors.toSet());
-
-              Set<String> validKeysIncludingCurrentLogs = allLogRecords.entrySet().stream()
-                  .filter(entry -> !(entry.getValue().getCurrentLocation() == null && entry.getValue().getNewLocation() == null))
-                  .map(Map.Entry::getKey)
-                  .collect(Collectors.toSet());
-
-              // Calculate deleted keys in the current log file
-              Set<String> deletedKeysInCurrentLog = currentLogRecords.entrySet().stream()
-                  .filter(entry -> entry.getValue().getCurrentLocation() == null && entry.getValue().getNewLocation() == null)
-                  .map(Map.Entry::getKey)
-                  .collect(Collectors.toSet());
-
-              // Compute the final set of deleted keys using the logic: D = C - (B - A)
-              Set<String> deletedKeys = computeDeletedKeys(validKeysForPreviousLogs, validKeysIncludingCurrentLogs, deletedKeysInCurrentLog);
+              Set<String> deletedKeys = getDeletedKeysFromMergedLogs(dataTableMetaClient, instantTime, engineType, logFilePaths, finalWriterSchemaOpt, fullFilePath);
 
               // Return RLI records for deleted keys
               return deletedKeys.isEmpty()
@@ -914,12 +859,87 @@ public class HoodieTableMetadataUtil {
     }
   }
 
+  /**
+   * Get the deleted keys from the merged log files. The logic is as below. Suppose:
+   * <li>A = Set of keys that are valid (not deleted) in the previous log files merged</li>
+   * <li>B = Set of keys that are valid in all log files including current log file merged</li>
+   * <li>C = Set of keys that are deleted in the current log file</li>
+   * <li>Then, D = Set of deleted keys = C - (B - A)</li>
+   *
+   * @param dataTableMetaClient  data table meta client
+   * @param instantTime          timestamp of the commit
+   * @param engineType           engine type (SPARK, FLINK, JAVA)
+   * @param logFilePaths         list of log file paths for which records need to be merged
+   * @param finalWriterSchemaOpt records schema
+   * @param fullFilePath         full path of the current log file
+   * @return set of deleted keys
+   */
   @VisibleForTesting
-  public static Map<String, HoodieRecord> getLogRecords(List<String> logFilePaths,
-                                                        HoodieTableMetaClient datasetMetaClient,
-                                                        Option<Schema> writerSchemaOpt,
-                                                        String latestCommitTimestamp,
-                                                        EngineType engineType) {
+  public static Set<String> getDeletedKeysFromMergedLogs(HoodieTableMetaClient dataTableMetaClient,
+                                                         String instantTime,
+                                                         EngineType engineType,
+                                                         List<String> logFilePaths,
+                                                         Option<Schema> finalWriterSchemaOpt,
+                                                         StoragePath fullFilePath) {
+    // Separate out the current log file
+    List<String> logFilePathsWithoutCurrentLogFile = logFilePaths.stream()
+        .filter(logFilePath -> !logFilePath.equals(fullFilePath.toString()))
+        .collect(toList());
+    if (logFilePathsWithoutCurrentLogFile.isEmpty()) {
+      // Only current log file is present, so we can directly get the deleted record keys from it and return the RLI records.
+      Map<String, HoodieRecord> currentLogRecords =
+          getLogRecords(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+      return currentLogRecords.entrySet().stream()
+          .filter(entry -> isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
+          .map(Map.Entry::getKey)
+          .collect(Collectors.toSet());
+    }
+    // Fetch log records for all log files
+    Map<String, HoodieRecord> allLogRecords =
+        getLogRecords(logFilePaths, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+
+    // Fetch log records for previous log files (excluding the current log file)
+    Map<String, HoodieRecord> previousLogRecords =
+        getLogRecords(logFilePathsWithoutCurrentLogFile, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+
+    // Fetch log records for the current log file
+    Map<String, HoodieRecord> currentLogRecords =
+        getLogRecords(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+
+    // Calculate valid (non-deleted) keys
+    Set<String> validKeysForPreviousLogs = previousLogRecords.entrySet().stream()
+        .filter(entry -> !isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
+        .map(Map.Entry::getKey)
+        .collect(Collectors.toSet());
+
+    Set<String> validKeysIncludingCurrentLogs = allLogRecords.entrySet().stream()
+        .filter(entry -> !isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
+        .map(Map.Entry::getKey)
+        .collect(Collectors.toSet());
+
+    // Calculate deleted keys in the current log file
+    Set<String> deletedKeysInCurrentLog = currentLogRecords.entrySet().stream()
+        .filter(entry -> isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
+        .map(Map.Entry::getKey)
+        .collect(Collectors.toSet());
+
+    // Compute the final set of deleted keys using the logic: D = C - (B - A)
+    return computeDeletedKeys(validKeysForPreviousLogs, validKeysIncludingCurrentLogs, deletedKeysInCurrentLog);
+  }
+
+  private static boolean isDeleteRecord(HoodieTableMetaClient dataTableMetaClient, Option<Schema> finalWriterSchemaOpt, HoodieRecord record) {
+    try {
+      return record.isDelete(finalWriterSchemaOpt.get(), dataTableMetaClient.getTableConfig().getProps());
+    } catch (IOException e) {
+      throw new HoodieException("Failed to check if record is delete", e);
+    }
+  }
+
+  private static Map<String, HoodieRecord> getLogRecords(List<String> logFilePaths,
+                                                         HoodieTableMetaClient datasetMetaClient,
+                                                         Option<Schema> writerSchemaOpt,
+                                                         String latestCommitTimestamp,
+                                                         EngineType engineType) {
     if (writerSchemaOpt.isPresent()) {
       final StorageConfiguration<?> storageConf = datasetMetaClient.getStorageConf();
       HoodieRecordMerger recordMerger = HoodieRecordUtils.createRecordMerger(
@@ -994,10 +1014,10 @@ public class HoodieTableMetadataUtil {
 
   @VisibleForTesting
   public static HoodieData<String> getRecordKeysDeletedOrUpdated(HoodieEngineContext engineContext,
-                                                           HoodieCommitMetadata commitMetadata,
-                                                           HoodieMetadataConfig metadataConfig,
-                                                           HoodieTableMetaClient dataTableMetaClient,
-                                                           String instantTime) {
+                                                                 HoodieCommitMetadata commitMetadata,
+                                                                 HoodieMetadataConfig metadataConfig,
+                                                                 HoodieTableMetaClient dataTableMetaClient,
+                                                                 String instantTime) {
     List<HoodieWriteStat> allWriteStats = commitMetadata.getPartitionToWriteStats().values().stream()
         .flatMap(Collection::stream).collect(Collectors.toList());
 
@@ -1042,7 +1062,7 @@ public class HoodieTableMetadataUtil {
             } else {
               throw new HoodieIOException("Found unsupported file type " + fullFilePath + ", while generating MDT records");
             }
-          }); // TODO: instead of collectAsList, we should pipeline this with the next stage of processing or return a HoodieData<HoodieRecord> here and then pipeline it.
+          });
     } catch (Exception e) {
       throw new HoodieException("Failed to fetch deleted record keys while preparing MDT records", e);
     }

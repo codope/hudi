@@ -1168,8 +1168,6 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
 
     HoodieIndexDefinition indexDefinition = getIndexDefinition(indexPartition);
     // Fetch the secondary keys that each of the record keys ('keysToRemove') maps to
-    // This is obtained by scanning the entire secondary index partition in the metadata table
-    // This could be an expensive operation for a large commit (updating/deleting millions of rows)
     HoodiePairData<String, String> recordKeySecondaryKeyMap =
         metadata.getSecondaryKeys(keysToRemove, indexDefinition.getIndexName(), dataWriteConfig.getMetadataConfig().getSecondaryIndexParallelism());
     HoodieData<HoodieRecord> deleteRecords = recordKeySecondaryKeyMap.map(
