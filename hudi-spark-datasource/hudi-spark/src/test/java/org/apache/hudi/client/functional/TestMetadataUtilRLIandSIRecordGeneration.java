@@ -274,7 +274,7 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
           Option.empty(), WriteOperationType.UPSERT, writeConfig.getSchema(), "commit");
 
       try {
-        HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated(context, commitMetadata, writeConfig.getMetadataConfig(), metaClient, finalCommitTime3, EngineType.SPARK);
+        HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated(context, commitMetadata, writeConfig.getMetadataConfig(), metaClient, finalCommitTime3);
         fail("Should not have reached here");
       } catch (Exception e) {
         // no op
@@ -317,11 +317,11 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
           try {
             // used for RLI
             finalActualDeletes.addAll(HoodieTableMetadataUtil.getRecordKeys(Collections.singletonList(basePath + "/" + writeStatus.getStat().getPath()), metaClient, writerSchemaOpt,
-                writeConfig.getMetadataConfig().getMaxReaderBufferSize(), latestCommitTimestamp, false, true, false, EngineType.SPARK));
+                writeConfig.getMetadataConfig().getMaxReaderBufferSize(), latestCommitTimestamp, false, true));
 
             // used in SI flow
             actualUpdatesAndDeletes.addAll(HoodieTableMetadataUtil.getRecordKeys(Collections.singletonList(basePath + "/" + writeStatus.getStat().getPath()), metaClient, writerSchemaOpt,
-                writeConfig.getMetadataConfig().getMaxReaderBufferSize(), latestCommitTimestamp, true, true, false, EngineType.SPARK));
+                writeConfig.getMetadataConfig().getMaxReaderBufferSize(), latestCommitTimestamp, true, true));
           } catch (IOException e) {
             throw new HoodieIOException("Failed w/ IOException ", e);
           }
@@ -335,7 +335,7 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
 
     // validate HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated for entire CommitMetadata which is used in SI code path.
     List<String> updatedOrDeletedKeys =
-        new ArrayList<>(HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated(context, commitMetadata, writeConfig.getMetadataConfig(), metaClient, finalCommitTime3, EngineType.SPARK));
+        new ArrayList<>(HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated(context, commitMetadata, writeConfig.getMetadataConfig(), metaClient, finalCommitTime3).collectAsList());
     List<String> expectedUpdatesOrDeletes = new ArrayList<>(expectedUpdates);
     expectedUpdatesOrDeletes.addAll(expectedRLIDeletes);
     assertListEquality(expectedUpatesAndDeletes, updatedOrDeletedKeys);

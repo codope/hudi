@@ -27,6 +27,7 @@ import org.apache.hudi.avro.model.HoodieRollbackMetadata;
 import org.apache.hudi.client.BaseHoodieWriteClient;
 import org.apache.hudi.common.config.HoodieMetadataConfig;
 import org.apache.hudi.common.data.HoodieData;
+import org.apache.hudi.common.data.HoodiePairData;
 import org.apache.hudi.common.engine.EngineType;
 import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.fs.FSUtils;
@@ -112,6 +113,7 @@ import static org.apache.hudi.metadata.HoodieTableMetadataUtil.DirectoryInfo;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getInflightMetadataPartitions;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getPartitionLatestFileSlicesIncludingInflight;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getProjectedSchemaForExpressionIndex;
+import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.readRecordKeysFromBaseFiles;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.readSecondaryKeysFromBaseFiles;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.readSecondaryKeysFromFileSlices;
@@ -547,10 +549,6 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
                                                                         String instantTime);
 
   protected abstract EngineType getEngineType();
-
-  public abstract HoodieData<HoodieRecord> getDeletedSecondaryRecordMapping(HoodieEngineContext engineContext,
-                                                                            Map<String, String> recordKeySecondaryKeyMap,
-                                                                            HoodieIndexDefinition indexDefinition);
 
   private Pair<Integer, HoodieData<HoodieRecord>> initializeExpressionIndexPartition(String indexName, String instantTime) throws Exception {
     HoodieIndexDefinition indexDefinition = getIndexDefinition(indexName);
@@ -1051,6 +1049,7 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
 
   /**
    * Update from {@code HoodieCommitMetadata}.
+   *
    * @param commitMetadata {@code HoodieCommitMetadata}
    * @param instantTime    Timestamp at which the commit was performed
    */
@@ -1160,17 +1159,21 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
 
   private HoodieData<HoodieRecord> getSecondaryIndexUpdates(HoodieCommitMetadata commitMetadata, String indexPartition, String instantTime) throws Exception {
     List<Pair<String, Pair<String, List<String>>>> partitionFilePairs = getPartitionFilePairs(commitMetadata);
+    if (partitionFilePairs.isEmpty()) {
+      return engineContext.emptyHoodieData();
+    }
     // Build a list of keys that need to be removed. A 'delete' record will be emitted into the respective FileGroup of
     // the secondary index partition for each of these keys.
-    List<String> keysToRemove = HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated(engineContext, commitMetadata, dataWriteConfig.getMetadataConfig(),
-        dataMetaClient, instantTime, getEngineType());
+    HoodieData<String> keysToRemove = getRecordKeysDeletedOrUpdated(engineContext, commitMetadata, dataWriteConfig.getMetadataConfig(), dataMetaClient, instantTime);
 
     HoodieIndexDefinition indexDefinition = getIndexDefinition(indexPartition);
     // Fetch the secondary keys that each of the record keys ('keysToRemove') maps to
     // This is obtained by scanning the entire secondary index partition in the metadata table
     // This could be an expensive operation for a large commit (updating/deleting millions of rows)
-    Map<String, String> recordKeySecondaryKeyMap = metadata.getSecondaryKeys(keysToRemove, indexDefinition.getIndexName());
-    HoodieData<HoodieRecord> deletedRecords = getDeletedSecondaryRecordMapping(engineContext, recordKeySecondaryKeyMap, indexDefinition);
+    HoodiePairData<String, String> recordKeySecondaryKeyMap =
+        metadata.getSecondaryKeys(keysToRemove, indexDefinition.getIndexName(), dataWriteConfig.getMetadataConfig().getSecondaryIndexParallelism());
+    HoodieData<HoodieRecord> deleteRecords = recordKeySecondaryKeyMap.map(
+        (recordKeyAndSecondaryKey) -> HoodieMetadataPayload.createSecondaryIndexRecord(recordKeyAndSecondaryKey.getKey(), recordKeyAndSecondaryKey.getValue(), indexDefinition.getIndexName(), true));
     // first deduce parallelism to avoid too few tasks for large number of records.
     long totalWriteBytesForSecondaryIndex = commitMetadata.getPartitionToWriteStats().values().stream()
         .flatMap(Collection::stream)
@@ -1185,18 +1188,9 @@ public abstract class HoodieBackedTableMetadataWriter<I> implements HoodieTableM
     // By loading on the driver one time, we avoid loading the same metadata multiple times on the executors.
     HoodieMetadataFileSystemView fsView = getMetadataView();
     fsView.loadPartitions(partitionFilePairs.stream().map(Pair::getKey).collect(Collectors.toList()));
-
-    return readSecondaryKeysFromBaseFiles(
-        engineContext,
-        partitionFilePairs,
-        parallelism,
-        this.getClass().getSimpleName(),
-        dataMetaClient,
-        getEngineType(),
-        indexDefinition,
-        fsView)
-        .union(deletedRecords)
-        .distinctWithKey(HoodieRecord::getKey, parallelism);
+    HoodieData<HoodieRecord> insertRecords =
+        readSecondaryKeysFromBaseFiles(engineContext, partitionFilePairs, parallelism, this.getClass().getSimpleName(), dataMetaClient, getEngineType(), indexDefinition, fsView);
+    return insertRecords.union(deleteRecords).distinctWithKey(HoodieRecord::getKey, parallelism);
   }
 
   /**
