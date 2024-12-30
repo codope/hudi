@@ -783,48 +783,85 @@ public class HoodieTableMetadataUtil {
                                                                              EngineType engineType) {
     List<HoodieWriteStat> allWriteStats = commitMetadata.getPartitionToWriteStats().values().stream()
         .flatMap(Collection::stream).collect(Collectors.toList());
-
+    // Return early if there are no write stats, or if the operation is a compaction.
     if (allWriteStats.isEmpty() || commitMetadata.getOperationType() == WriteOperationType.COMPACT) {
       return engineContext.emptyHoodieData();
     }
+    // RLI cannot support logs having inserts with current offering. So, lets validate that.
+    if (allWriteStats.stream().anyMatch(writeStat -> {
+      String fileName = FSUtils.getFileName(writeStat.getPath(), writeStat.getPartitionPath());
+      return FSUtils.isLogFile(fileName) && writeStat.getNumInserts() > 0;
+    })) {
+      throw new HoodieIOException("RLI cannot support logs having inserts with current offering. Would recommend disabling Record Level Index");
+    }
 
     try {
-      int parallelism = Math.max(Math.min(allWriteStats.size(), metadataConfig.getRecordIndexMaxParallelism()), 1);
+      Map<String, List<HoodieWriteStat>> writeStatsByFileId = allWriteStats.stream().collect(Collectors.groupingBy(HoodieWriteStat::getFileId));
+      int parallelism = Math.max(Math.min(writeStatsByFileId.size(), metadataConfig.getRecordIndexMaxParallelism()), 1);
       String basePath = dataTableMetaClient.getBasePath().toString();
       HoodieFileFormat baseFileFormat = dataTableMetaClient.getTableConfig().getBaseFileFormat();
-      // RLI cannot support logs having inserts with current offering. So, lets validate that.
-      if (allWriteStats.stream().anyMatch(writeStat -> {
-        String fileName = FSUtils.getFileName(writeStat.getPath(), writeStat.getPartitionPath());
-        return FSUtils.isLogFile(fileName) && writeStat.getNumInserts() > 0;
-      })) {
-        throw new HoodieIOException("RLI cannot support logs having inserts with current offering. Would recommend disabling Record Level Index");
-      }
-
       StorageConfiguration storageConfiguration = dataTableMetaClient.getStorageConf();
       Option<Schema> writerSchemaOpt = tryResolveSchemaForTable(dataTableMetaClient);
       Option<Schema> finalWriterSchemaOpt = writerSchemaOpt;
-      HoodieData<HoodieRecord> recordIndexRecords = engineContext.parallelize(allWriteStats, parallelism)
-          .flatMap(writeStat -> {
-            HoodieStorage storage = HoodieStorageUtils.getStorage(new StoragePath(writeStat.getPath()), storageConfiguration);
-            StoragePath fullFilePath = new StoragePath(dataTableMetaClient.getBasePath(), writeStat.getPath());
-            // handle base files
-            if (writeStat.getPath().endsWith(baseFileFormat.getFileExtension())) {
-              return BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(basePath, writeStat, writesFileIdEncoding, instantTime, storage);
-            } else if (FSUtils.isLogFile(fullFilePath)) {
-              checkState(writeStat instanceof HoodieDeltaWriteStat, "Log file should be associated with a delta write stat");
-              List<String> logFilePaths = ((HoodieDeltaWriteStat) writeStat).getLogFiles().stream()
-                  .map(logFile -> new StoragePath(new StoragePath(dataTableMetaClient.getBasePath(), writeStat.getPartitionPath()), logFile).toString())
-                  .collect(toList());
-
-              Set<String> deletedKeys = getDeletedKeysFromMergedLogs(dataTableMetaClient, instantTime, engineType, logFilePaths, finalWriterSchemaOpt, fullFilePath);
-
-              // Return RLI records for deleted keys
-              return deletedKeys.isEmpty()
-                  ? Collections.emptyIterator()
-                  : deletedKeys.stream().map(HoodieMetadataPayload::createRecordIndexDelete).collect(toList()).iterator();
-            } else {
-              throw new HoodieIOException("Unsupported file type " + fullFilePath.toString() + " while generating MDT records");
+      HoodieData<HoodieRecord> recordIndexRecords = engineContext.parallelize(new ArrayList<>(writeStatsByFileId.entrySet()), parallelism)
+          .flatMap(writeStatsByFileIdEntry -> {
+            String fileId = writeStatsByFileIdEntry.getKey();
+            List<HoodieWriteStat> writeStats = writeStatsByFileIdEntry.getValue();
+            // Partition the write stats into base file and log file write stats
+            List<HoodieWriteStat> baseFileWriteStats = writeStats.stream()
+                .filter(writeStat -> writeStat.getPath().endsWith(baseFileFormat.getFileExtension()))
+                .collect(Collectors.toList());
+            List<HoodieWriteStat> logFileWriteStats = writeStats.stream()
+                .filter(writeStat -> FSUtils.isLogFile(writeStat.getPath()))
+                .collect(Collectors.toList());
+            // Ensure that only one of base file or log file write stats exists
+            checkState(baseFileWriteStats.isEmpty() || logFileWriteStats.isEmpty(),
+                "A single fileId cannot have both base file and log file write stats in the same commit. FileId: " + fileId);
+            // Process base file write stats
+            if (!baseFileWriteStats.isEmpty()) {
+              return baseFileWriteStats.stream()
+                  .flatMap(writeStat -> {
+                    HoodieStorage storage = HoodieStorageUtils.getStorage(new StoragePath(writeStat.getPath()), storageConfiguration);
+                    return CollectionUtils.toStream(BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(basePath, writeStat, writesFileIdEncoding, instantTime, storage));
+                  })
+                  .iterator();
             }
+            // Process log file write stats
+            if (!logFileWriteStats.isEmpty()) {
+              String partitionPath = logFileWriteStats.get(0).getPartitionPath();
+              List<String> currentLogFilePaths = logFileWriteStats.stream()
+                  .map(writeStat -> new StoragePath(dataTableMetaClient.getBasePath(), writeStat.getPath()).toString())
+                  .collect(Collectors.toList());
+              List<String> allLogFilePaths = logFileWriteStats.stream()
+                  .flatMap(writeStat -> {
+                    checkState(writeStat instanceof HoodieDeltaWriteStat, "Log file should be associated with a delta write stat");
+                    List<String> currentLogFiles = ((HoodieDeltaWriteStat) writeStat).getLogFiles().stream()
+                        .map(logFile -> new StoragePath(new StoragePath(dataTableMetaClient.getBasePath(), writeStat.getPartitionPath()), logFile).toString())
+                        .collect(Collectors.toList());
+                    return currentLogFiles.stream();
+                  })
+                  .collect(Collectors.toList());
+              // Extract revived and deleted keys
+              Pair<Set<String>, Set<String>> revivedAndDeletedKeys =
+                  getRevivedAndDeletedKeysFromMergedLogs(dataTableMetaClient, instantTime, engineType, allLogFilePaths, finalWriterSchemaOpt, currentLogFilePaths);
+              Set<String> revivedKeys = revivedAndDeletedKeys.getLeft();
+              Set<String> deletedKeys = revivedAndDeletedKeys.getRight();
+              // Process revived keys to create updates
+              List<HoodieRecord> revivedRecords = revivedKeys.stream()
+                  .map(recordKey -> HoodieMetadataPayload.createRecordIndexUpdate(recordKey, partitionPath, fileId, instantTime, writesFileIdEncoding))
+                  .collect(Collectors.toList());
+              // Process deleted keys to create deletes
+              List<HoodieRecord> deletedRecords = deletedKeys.stream()
+                  .map(HoodieMetadataPayload::createRecordIndexDelete)
+                  .collect(Collectors.toList());
+              // Combine all records into one list
+              List<HoodieRecord> allRecords = new ArrayList<>();
+              allRecords.addAll(revivedRecords);
+              allRecords.addAll(deletedRecords);
+              return allRecords.iterator();
+            }
+            // No base file or log file write stats found
+            return Collections.emptyIterator();
           });
 
       // there are chances that same record key from data table has 2 entries (1 delete from older partition and 1 insert to newer partition)
@@ -857,62 +894,59 @@ public class HoodieTableMetadataUtil {
    * @param dataTableMetaClient  data table meta client
    * @param instantTime          timestamp of the commit
    * @param engineType           engine type (SPARK, FLINK, JAVA)
-   * @param logFilePaths         list of log file paths for which records need to be merged
+   * @param logFilePaths         list of log file paths including current and previous file slices
    * @param finalWriterSchemaOpt records schema
-   * @param fullFilePath         full path of the current log file
-   * @return set of deleted keys
+   * @param currentLogFilePaths  list of log file paths for the current instant
+   * @return pair of revived and deleted keys
    */
   @VisibleForTesting
-  public static Set<String> getDeletedKeysFromMergedLogs(HoodieTableMetaClient dataTableMetaClient,
-                                                         String instantTime,
-                                                         EngineType engineType,
-                                                         List<String> logFilePaths,
-                                                         Option<Schema> finalWriterSchemaOpt,
-                                                         StoragePath fullFilePath) {
-    // Separate out the current log file
-    List<String> logFilePathsWithoutCurrentLogFile = logFilePaths.stream()
-        .filter(logFilePath -> !logFilePath.equals(fullFilePath.toString()))
+  public static Pair<Set<String>, Set<String>> getRevivedAndDeletedKeysFromMergedLogs(HoodieTableMetaClient dataTableMetaClient,
+                                                                                      String instantTime,
+                                                                                      EngineType engineType,
+                                                                                      List<String> logFilePaths,
+                                                                                      Option<Schema> finalWriterSchemaOpt,
+                                                                                      List<String> currentLogFilePaths) {
+    // Separate out the current log files
+    List<String> logFilePathsWithoutCurrentLogFiles = logFilePaths.stream()
+        .filter(logFilePath -> !currentLogFilePaths.contains(logFilePath))
         .collect(toList());
-    if (logFilePathsWithoutCurrentLogFile.isEmpty()) {
+    if (logFilePathsWithoutCurrentLogFiles.isEmpty()) {
       // Only current log file is present, so we can directly get the deleted record keys from it and return the RLI records.
       Map<String, HoodieRecord> currentLogRecords =
-          getLogRecords(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
-      return currentLogRecords.entrySet().stream()
+          getLogRecords(currentLogFilePaths, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+      Set<String> deletedKeys = currentLogRecords.entrySet().stream()
           .filter(entry -> isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
           .map(Map.Entry::getKey)
           .collect(Collectors.toSet());
+      return Pair.of(Collections.emptySet(), deletedKeys);
     }
     // Fetch log records for all log files
     Map<String, HoodieRecord> allLogRecords =
         getLogRecords(logFilePaths, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
 
-    // Fetch log records for previous log files (excluding the current log file)
+    // Fetch log records for previous log files (excluding the current log files)
     Map<String, HoodieRecord> previousLogRecords =
-        getLogRecords(logFilePathsWithoutCurrentLogFile, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+        getLogRecords(logFilePathsWithoutCurrentLogFiles, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
 
-    // Fetch log records for the current log file
-    Map<String, HoodieRecord> currentLogRecords =
-        getLogRecords(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
+    // Partition valid (non-deleted) and deleted keys from previous log files in a single pass
+    Map<Boolean, Set<String>> partitionedKeysForPreviousLogs = previousLogRecords.entrySet().stream()
+        .collect(Collectors.partitioningBy(
+            entry -> !isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()),
+            Collectors.mapping(Map.Entry::getKey, Collectors.toSet())
+        ));
+    Set<String> validKeysForPreviousLogs = partitionedKeysForPreviousLogs.get(true);
+    Set<String> deletedKeysForPreviousLogs = partitionedKeysForPreviousLogs.get(false);
 
-    // Calculate valid (non-deleted) keys
-    Set<String> validKeysForPreviousLogs = previousLogRecords.entrySet().stream()
-        .filter(entry -> !isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
-        .map(Map.Entry::getKey)
-        .collect(Collectors.toSet());
+    // Partition valid (non-deleted) and deleted keys from all log files, including current, in a single pass
+    Map<Boolean, Set<String>> partitionedKeysForAllLogs = allLogRecords.entrySet().stream()
+        .collect(Collectors.partitioningBy(
+            entry -> !isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()),
+            Collectors.mapping(Map.Entry::getKey, Collectors.toSet())
+        ));
+    Set<String> validKeysForAllLogs = partitionedKeysForAllLogs.get(true);
+    Set<String> deletedKeysForAllLogs = partitionedKeysForAllLogs.get(false);
 
-    Set<String> validKeysIncludingCurrentLogs = allLogRecords.entrySet().stream()
-        .filter(entry -> !isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
-        .map(Map.Entry::getKey)
-        .collect(Collectors.toSet());
-
-    // Calculate deleted keys in the current log file
-    Set<String> deletedKeysInCurrentLog = currentLogRecords.entrySet().stream()
-        .filter(entry -> isDeleteRecord(dataTableMetaClient, finalWriterSchemaOpt, entry.getValue()))
-        .map(Map.Entry::getKey)
-        .collect(Collectors.toSet());
-
-    // Compute the final set of deleted keys using the logic: D = C - (B - A)
-    return computeDeletedKeys(validKeysForPreviousLogs, validKeysIncludingCurrentLogs, deletedKeysInCurrentLog);
+    return computeRevivedAndDeletedKeys(validKeysForPreviousLogs, deletedKeysForPreviousLogs, validKeysForAllLogs, deletedKeysForAllLogs);
   }
 
   private static boolean isDeleteRecord(HoodieTableMetaClient dataTableMetaClient, Option<Schema> finalWriterSchemaOpt, HoodieRecord record) {
@@ -958,18 +992,19 @@ public class HoodieTableMetadataUtil {
   }
 
   @VisibleForTesting
-  public static Set<String> computeDeletedKeys(Set<String> mergedRecordKeysForPreviousLogFiles,
-                                               Set<String> mergedRecordKeysIncludingCurrentLogFile,
-                                               Set<String> deletedRecordKeysInCurrentLogFile) {
-    // Step 1: Compute (B - A)
-    Set<String> keysNewlyValid = new HashSet<>(mergedRecordKeysIncludingCurrentLogFile);
-    keysNewlyValid.removeAll(mergedRecordKeysForPreviousLogFiles);
+  public static Pair<Set<String>, Set<String>> computeRevivedAndDeletedKeys(Set<String> validKeysForPreviousLogs,
+                                                                            Set<String> deletedKeysForPreviousLogs,
+                                                                            Set<String> validKeysForAllLogs,
+                                                                            Set<String> deletedKeysForAllLogs) {
+    // Compute revived keys: previously deleted but now valid
+    Set<String> revivedKeys = new HashSet<>(deletedKeysForPreviousLogs);
+    revivedKeys.retainAll(validKeysForAllLogs); // Intersection of previously deleted and now valid
 
-    // Step 2: Compute D = C - (B - A)
-    Set<String> deletedKeys = new HashSet<>(deletedRecordKeysInCurrentLogFile);
-    deletedKeys.removeAll(keysNewlyValid);
+    // Compute deleted keys: previously valid but now deleted
+    Set<String> deletedKeys = new HashSet<>(validKeysForPreviousLogs);
+    deletedKeys.retainAll(deletedKeysForAllLogs); // Intersection of previously valid and now deleted
 
-    return deletedKeys;
+    return Pair.of(revivedKeys, deletedKeys);
   }
 
   /**

@@ -63,9 +63,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.convertMetadataToRecordIndexRecords;
-import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getDeletedKeysFromMergedLogs;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRecordKeys;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated;
+import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRevivedAndDeletedKeysFromMergedLogs;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.reduceByKeys;
 import static org.apache.hudi.testutils.Assertions.assertNoWriteErrors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,23 +108,19 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
       writeStatuses1.forEach(writeStatus -> {
         assertEquals(writeStatus.getStat().getNumDeletes(), 0);
         // Fetch record keys for all
-        try {
-          String writeStatFileId = writeStatus.getFileId();
-          if (!fileIdToFileNameMapping1.containsKey(writeStatFileId)) {
-            fileIdToFileNameMapping1.put(writeStatFileId, writeStatus.getStat().getPath().substring(writeStatus.getStat().getPath().lastIndexOf("/") + 1));
-          }
+        String writeStatFileId = writeStatus.getFileId();
+        if (!fileIdToFileNameMapping1.containsKey(writeStatFileId)) {
+          fileIdToFileNameMapping1.put(writeStatFileId, writeStatus.getStat().getPath().substring(writeStatus.getStat().getPath().lastIndexOf("/") + 1));
+        }
 
-          // poll into generateRLIMetadataHoodieRecordsForBaseFile to fetch MDT RLI records for inserts and deletes.
-          Iterator<HoodieRecord> rliRecordsItr = BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(metaClient.getBasePath().toString(),
-              writeStatus.getStat(), writeConfig.getWritesFileIdEncoding(), finalCommitTime, metaClient.getStorage());
-          while (rliRecordsItr.hasNext()) {
-            HoodieRecord rliRecord = rliRecordsItr.next();
-            String key = rliRecord.getRecordKey();
-            String partition = ((HoodieMetadataPayload) rliRecord.getData()).getRecordGlobalLocation().getPartitionPath();
-            recordKeyToPartitionMapping1.put(key, partition);
-          }
-        } catch (IOException e) {
-          throw new HoodieException("Should not have failed ", e);
+        // poll into generateRLIMetadataHoodieRecordsForBaseFile to fetch MDT RLI records for inserts and deletes.
+        Iterator<HoodieRecord> rliRecordsItr = BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(metaClient.getBasePath().toString(),
+            writeStatus.getStat(), writeConfig.getWritesFileIdEncoding(), finalCommitTime, metaClient.getStorage());
+        while (rliRecordsItr.hasNext()) {
+          HoodieRecord rliRecord = rliRecordsItr.next();
+          String key = rliRecord.getRecordKey();
+          String partition = ((HoodieMetadataPayload) rliRecord.getData()).getRecordGlobalLocation().getPartitionPath();
+          recordKeyToPartitionMapping1.put(key, partition);
         }
       });
 
@@ -216,23 +212,19 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
       writeStatuses1.forEach(writeStatus -> {
         assertEquals(writeStatus.getStat().getNumDeletes(), 0);
         // Fetch record keys for all
-        try {
-          String writeStatFileId = writeStatus.getFileId();
-          if (!fileIdToFileNameMapping1.containsKey(writeStatFileId)) {
-            fileIdToFileNameMapping1.put(writeStatFileId, writeStatus.getStat().getPath().substring(writeStatus.getStat().getPath().lastIndexOf("/") + 1));
-          }
+        String writeStatFileId = writeStatus.getFileId();
+        if (!fileIdToFileNameMapping1.containsKey(writeStatFileId)) {
+          fileIdToFileNameMapping1.put(writeStatFileId, writeStatus.getStat().getPath().substring(writeStatus.getStat().getPath().lastIndexOf("/") + 1));
+        }
 
-          // poll into generateRLIMetadataHoodieRecordsForBaseFile to fetch MDT RLI records for inserts and deletes.
-          Iterator<HoodieRecord> rliRecordsItr = BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(metaClient.getBasePath().toString(),
-              writeStatus.getStat(), writeConfig.getWritesFileIdEncoding(), finalCommitTime, metaClient.getStorage());
-          while (rliRecordsItr.hasNext()) {
-            HoodieRecord rliRecord = rliRecordsItr.next();
-            String key = rliRecord.getRecordKey();
-            String partition = ((HoodieMetadataPayload) rliRecord.getData()).getRecordGlobalLocation().getPartitionPath();
-            recordKeyToPartitionMapping1.put(key, partition);
-          }
-        } catch (IOException e) {
-          throw new HoodieException("Should not have failed ", e);
+        // poll into generateRLIMetadataHoodieRecordsForBaseFile to fetch MDT RLI records for inserts and deletes.
+        Iterator<HoodieRecord> rliRecordsItr = BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(metaClient.getBasePath().toString(),
+            writeStatus.getStat(), writeConfig.getWritesFileIdEncoding(), finalCommitTime, metaClient.getStorage());
+        while (rliRecordsItr.hasNext()) {
+          HoodieRecord rliRecord = rliRecordsItr.next();
+          String key = rliRecord.getRecordKey();
+          String partition = ((HoodieMetadataPayload) rliRecord.getData()).getRecordGlobalLocation().getPartitionPath();
+          recordKeyToPartitionMapping1.put(key, partition);
         }
       });
 
@@ -322,8 +314,8 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
           try {
             StoragePath fullFilePath = new StoragePath(basePath, writeStatus.getStat().getPath());
             // used for RLI
-            finalActualDeletes.addAll(
-                getDeletedKeysFromMergedLogs(metaClient, latestCommitTimestamp, EngineType.SPARK, Collections.singletonList(fullFilePath.toString()), writerSchemaOpt, fullFilePath));
+            finalActualDeletes.addAll(getRevivedAndDeletedKeysFromMergedLogs(metaClient, latestCommitTimestamp, EngineType.SPARK, Collections.singletonList(fullFilePath.toString()), writerSchemaOpt,
+                Collections.singletonList(fullFilePath.toString())).getValue());
 
             // used in SI flow
             actualUpdatesAndDeletes.addAll(getRecordKeys(Collections.singletonList(fullFilePath.toString()), metaClient, writerSchemaOpt,
@@ -453,25 +445,21 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
     writeStatuses.forEach(writeStatus -> {
       if (!FSUtils.isLogFile(FSUtils.getFileName(writeStatus.getStat().getPath(), writeStatus.getPartitionPath()))) {
         // Fetch record keys for all
-        try {
-          String writeStatFileId = writeStatus.getFileId();
-          if (!fileIdToFileNameMapping.isEmpty()) {
-            assertEquals(writeStatus.getStat().getPrevBaseFile(), fileIdToFileNameMapping.get(writeStatFileId));
-          }
+        String writeStatFileId = writeStatus.getFileId();
+        if (!fileIdToFileNameMapping.isEmpty()) {
+          assertEquals(writeStatus.getStat().getPrevBaseFile(), fileIdToFileNameMapping.get(writeStatFileId));
+        }
 
-          Iterator<HoodieRecord> rliRecordsItr = BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(metaClient.getBasePath().toString(), writeStatus.getStat(),
-              writeConfig.getWritesFileIdEncoding(), commitTime, metaClient.getStorage());
-          while (rliRecordsItr.hasNext()) {
-            HoodieRecord rliRecord = rliRecordsItr.next();
-            String key = rliRecord.getRecordKey();
-            if (rliRecord.getData() instanceof EmptyHoodieRecordPayload) {
-              actualDeletes.add(key);
-            } else {
-              actualInserts.add(key);
-            }
+        Iterator<HoodieRecord> rliRecordsItr = BaseFileRecordParsingUtils.generateRLIMetadataHoodieRecordsForBaseFile(metaClient.getBasePath().toString(), writeStatus.getStat(),
+            writeConfig.getWritesFileIdEncoding(), commitTime, metaClient.getStorage());
+        while (rliRecordsItr.hasNext()) {
+          HoodieRecord rliRecord = rliRecordsItr.next();
+          String key = rliRecord.getRecordKey();
+          if (rliRecord.getData() instanceof EmptyHoodieRecordPayload) {
+            actualDeletes.add(key);
+          } else {
+            actualInserts.add(key);
           }
-        } catch (IOException e) {
-          throw new HoodieException("Should not have failed ", e);
         }
       }
     });
@@ -483,33 +471,29 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
     writeStatuses.forEach(writeStatus -> {
       if (!FSUtils.isLogFile(FSUtils.getFileName(writeStatus.getStat().getPath(), writeStatus.getPartitionPath()))) {
         // Fetch record keys for all
-        try {
-          String writeStatFileId = writeStatus.getFileId();
-          if (!fileIdToFileNameMapping.isEmpty()) {
-            assertEquals(writeStatus.getStat().getPrevBaseFile(), fileIdToFileNameMapping.get(writeStatFileId));
-          }
+        String writeStatFileId = writeStatus.getFileId();
+        if (!fileIdToFileNameMapping.isEmpty()) {
+          assertEquals(writeStatus.getStat().getPrevBaseFile(), fileIdToFileNameMapping.get(writeStatFileId));
+        }
 
-          String partition = writeStatus.getStat().getPartitionPath();
-          String latestFileName = FSUtils.getFileNameFromPath(writeStatus.getStat().getPath());
+        String partition = writeStatus.getStat().getPartitionPath();
+        String latestFileName = FSUtils.getFileNameFromPath(writeStatus.getStat().getPath());
 
-          Set<BaseFileRecordParsingUtils.RecordStatus> recordStatusSet = new HashSet<>();
-          recordStatusSet.add(BaseFileRecordParsingUtils.RecordStatus.INSERT);
-          recordStatusSet.add(BaseFileRecordParsingUtils.RecordStatus.UPDATE);
-          recordStatusSet.add(BaseFileRecordParsingUtils.RecordStatus.DELETE);
+        Set<BaseFileRecordParsingUtils.RecordStatus> recordStatusSet = new HashSet<>();
+        recordStatusSet.add(BaseFileRecordParsingUtils.RecordStatus.INSERT);
+        recordStatusSet.add(BaseFileRecordParsingUtils.RecordStatus.UPDATE);
+        recordStatusSet.add(BaseFileRecordParsingUtils.RecordStatus.DELETE);
 
-          Map<BaseFileRecordParsingUtils.RecordStatus, List<String>> recordKeyMappings = BaseFileRecordParsingUtils.getRecordKeyStatuses(metaClient.getBasePath().toString(), partition, latestFileName,
-              writeStatus.getStat().getPrevBaseFile(), storage, recordStatusSet);
-          if (recordKeyMappings.containsKey(BaseFileRecordParsingUtils.RecordStatus.INSERT)) {
-            actualInserts.addAll(recordKeyMappings.get(BaseFileRecordParsingUtils.RecordStatus.INSERT));
-          }
-          if (recordKeyMappings.containsKey(BaseFileRecordParsingUtils.RecordStatus.UPDATE)) {
-            actualUpdates.addAll(recordKeyMappings.get(BaseFileRecordParsingUtils.RecordStatus.UPDATE));
-          }
-          if (recordKeyMappings.containsKey(BaseFileRecordParsingUtils.RecordStatus.DELETE)) {
-            actualDeletes.addAll(recordKeyMappings.get(BaseFileRecordParsingUtils.RecordStatus.DELETE));
-          }
-        } catch (IOException e) {
-          throw new HoodieException("Should not have failed ", e);
+        Map<BaseFileRecordParsingUtils.RecordStatus, List<String>> recordKeyMappings = BaseFileRecordParsingUtils.getRecordKeyStatuses(metaClient.getBasePath().toString(), partition, latestFileName,
+            writeStatus.getStat().getPrevBaseFile(), storage, recordStatusSet);
+        if (recordKeyMappings.containsKey(BaseFileRecordParsingUtils.RecordStatus.INSERT)) {
+          actualInserts.addAll(recordKeyMappings.get(BaseFileRecordParsingUtils.RecordStatus.INSERT));
+        }
+        if (recordKeyMappings.containsKey(BaseFileRecordParsingUtils.RecordStatus.UPDATE)) {
+          actualUpdates.addAll(recordKeyMappings.get(BaseFileRecordParsingUtils.RecordStatus.UPDATE));
+        }
+        if (recordKeyMappings.containsKey(BaseFileRecordParsingUtils.RecordStatus.DELETE)) {
+          actualDeletes.addAll(recordKeyMappings.get(BaseFileRecordParsingUtils.RecordStatus.DELETE));
         }
       }
     });
