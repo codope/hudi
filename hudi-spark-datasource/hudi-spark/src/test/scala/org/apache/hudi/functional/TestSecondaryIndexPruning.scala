@@ -52,7 +52,6 @@ import org.scalatest.Assertions.{assertResult, assertThrows}
 
 import java.util.concurrent.Executors
 import scala.collection.JavaConverters
-import scala.collection.immutable.Seq
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
 
@@ -1061,7 +1060,7 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
       Seq(1, "row1", "abc", "p1"),
       Seq(3, "row3", "xyz1", "p1")
     )
-    verifyQueryPredicate(hudiOpts, "not_record_key_col", "abc")
+    verifyQueryPredicate(hudiOpts, "not_record_key_col")
   }
 
   @Test
@@ -1256,7 +1255,6 @@ class TestSecondaryIndexPruning extends SparkClientFunctionalTestHarness {
   private def confirmLastCommitType(actionType: ActionType): Unit = {
     metaClient = HoodieTableMetaClient.reload(metaClient)
     val instants = metaClient.getActiveTimeline.getInstants
-    System.out.println("current instants: " + instants)
     assertFalse(instants.isEmpty)
     assertTrue(instants.get(instants.size - 1).getAction.equals(actionType.name))
   }
