@@ -29,12 +29,9 @@ import org.apache.hudi.common.model.HoodieCommitMetadata;
 import org.apache.hudi.common.model.HoodieFailedWritesCleaningPolicy;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieTableType;
-import org.apache.hudi.common.model.HoodieWriteStat;
-import org.apache.hudi.common.model.WriteOperationType;
 import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.TableSchemaResolver;
-import org.apache.hudi.common.util.CommitUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.config.HoodieCompactionConfig;
 import org.apache.hudi.config.HoodieWriteConfig;
@@ -64,7 +61,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.convertMetadataToRecordIndexRecords;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRecordKeys;
-import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.getRevivedAndDeletedKeysFromMergedLogs;
 import static org.apache.hudi.metadata.HoodieTableMetadataUtil.reduceByKeys;
 import static org.apache.hudi.testutils.Assertions.assertNoWriteErrors;
@@ -264,19 +260,6 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
       assertNoWriteErrors(writeStatuses3);
       assertRLIandSIRecordGenerationAPIs(inserts3, updates3, deletes3, writeStatuses3, finalCommitTime3, writeConfig);
 
-      // lets validate that if any log file contains inserts, fetching keys will fail.
-      HoodieWriteStat writeStat = writeStatuses3.get(1).getStat();
-      writeStat.setNumInserts(5);
-      HoodieCommitMetadata commitMetadata = CommitUtils.buildMetadata(Collections.singletonList(writeStat), Collections.emptyMap(),
-          Option.empty(), WriteOperationType.UPSERT, writeConfig.getSchema(), "commit");
-
-      try {
-        getRecordKeysDeletedOrUpdated(context, commitMetadata, writeConfig.getMetadataConfig(), metaClient, finalCommitTime3);
-        fail("Should not have reached here");
-      } catch (Exception e) {
-        // no op
-      }
-
       // trigger compaction
       Option<String> compactionInstantOpt = client.scheduleCompaction(Option.empty());
       assertTrue(compactionInstantOpt.isPresent());
@@ -328,15 +311,6 @@ public class TestMetadataUtilRLIandSIRecordGeneration extends HoodieClientTestBa
     assertListEquality(expectedRLIInserts, actualInserts);
     assertListEquality(expectedRLIDeletes, actualDeletes);
     assertListEquality(expectedUpatesAndDeletes, actualUpdatesAndDeletes);
-    HoodieCommitMetadata commitMetadata = CommitUtils.buildMetadata(writeStatuses3.stream().map(writeStatus -> writeStatus.getStat()).collect(Collectors.toList()), Collections.emptyMap(),
-        Option.empty(), WriteOperationType.UPSERT, writeConfig.getSchema(), "commit");
-
-    // validate HoodieTableMetadataUtil.getRecordKeysDeletedOrUpdated for entire CommitMetadata which is used in SI code path.
-    List<String> updatedOrDeletedKeys =
-        new ArrayList<>(getRecordKeysDeletedOrUpdated(context, commitMetadata, writeConfig.getMetadataConfig(), metaClient, finalCommitTime3).collectAsList());
-    List<String> expectedUpdatesOrDeletes = new ArrayList<>(expectedUpdates);
-    expectedUpdatesOrDeletes.addAll(expectedRLIDeletes);
-    assertListEquality(expectedUpatesAndDeletes, updatedOrDeletedKeys);
   }
 
   @Test

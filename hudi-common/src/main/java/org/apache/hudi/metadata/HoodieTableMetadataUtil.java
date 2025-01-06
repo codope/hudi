@@ -813,7 +813,7 @@ public class HoodieTableMetadataUtil {
                 .filter(writeStat -> writeStat.getPath().endsWith(baseFileFormat.getFileExtension()))
                 .collect(Collectors.toList());
             List<HoodieWriteStat> logFileWriteStats = writeStats.stream()
-                .filter(writeStat -> FSUtils.isLogFile(writeStat.getPath()))
+                .filter(writeStat -> FSUtils.isLogFile(new StoragePath(writeStats.get(0).getPath())))
                 .collect(Collectors.toList());
             // Ensure that only one of base file or log file write stats exists
             checkState(baseFileWriteStats.isEmpty() || logFileWriteStats.isEmpty(),
@@ -861,7 +861,7 @@ public class HoodieTableMetadataUtil {
               allRecords.addAll(deletedRecords);
               return allRecords.iterator();
             }
-            // No base file or log file write stats found
+            LOG.warn("No base file or log file write stats found for fileId: {}", fileId);
             return Collections.emptyIterator();
           });
 
@@ -886,7 +886,7 @@ public class HoodieTableMetadataUtil {
   }
 
   /**
-   * Get the deleted keys from the merged log files. The logic is as below. Suppose:
+   * Get the revived and deleted keys from the merged log files. The logic is as below. Suppose:
    * <li>A = Set of keys that are valid (not deleted) in the previous log files merged</li>
    * <li>B = Set of keys that are valid in all log files including current log file merged</li>
    * <li>C = Set of keys that are deleted in the current log file</li>
@@ -921,6 +921,11 @@ public class HoodieTableMetadataUtil {
           .collect(Collectors.toSet());
       return Pair.of(Collections.emptySet(), deletedKeys);
     }
+    return getRevivedAndDeletedKeys(dataTableMetaClient, instantTime, engineType, logFilePaths, finalWriterSchemaOpt, logFilePathsWithoutCurrentLogFiles);
+  }
+
+  private static Pair<Set<String>, Set<String>> getRevivedAndDeletedKeys(HoodieTableMetaClient dataTableMetaClient, String instantTime, EngineType engineType, List<String> logFilePaths,
+                                                                         Option<Schema> finalWriterSchemaOpt, List<String> logFilePathsWithoutCurrentLogFiles) {
     // Fetch log records for all log files
     Map<String, HoodieRecord> allLogRecords =
         getLogRecords(logFilePaths, dataTableMetaClient, finalWriterSchemaOpt, instantTime, engineType);
@@ -1034,62 +1039,6 @@ public class HoodieTableMetadataUtil {
                 + record1.getData().toString() + ", record 2 : " + record2.getData().toString());
           }
         }, parallelism).values();
-  }
-
-  @VisibleForTesting
-  public static HoodieData<String> getRecordKeysDeletedOrUpdated(HoodieEngineContext engineContext,
-                                                                 HoodieCommitMetadata commitMetadata,
-                                                                 HoodieMetadataConfig metadataConfig,
-                                                                 HoodieTableMetaClient dataTableMetaClient,
-                                                                 String instantTime) {
-    List<HoodieWriteStat> allWriteStats = commitMetadata.getPartitionToWriteStats().values().stream()
-        .flatMap(Collection::stream).collect(Collectors.toList());
-
-    if (allWriteStats.isEmpty()) {
-      return engineContext.emptyHoodieData();
-    }
-
-    try {
-      int parallelism = Math.max(Math.min(allWriteStats.size(), metadataConfig.getRecordIndexMaxParallelism()), 1);
-      String basePath = dataTableMetaClient.getBasePath().toString();
-      HoodieFileFormat baseFileFormat = dataTableMetaClient.getTableConfig().getBaseFileFormat();
-      // SI cannot support logs having inserts with current offering. So, lets validate that.
-      if (allWriteStats.stream().anyMatch(writeStat -> {
-        String fileName = FSUtils.getFileName(writeStat.getPath(), writeStat.getPartitionPath());
-        return FSUtils.isLogFile(fileName) && writeStat.getNumInserts() > 0;
-      })) {
-        throw new HoodieIOException("Secondary index cannot support logs having inserts with current offering. Can you drop secondary index.");
-      }
-
-      // we might need to set some additional variables if we need to process log files.
-      boolean anyLogFiles = allWriteStats.stream().anyMatch(writeStat -> {
-        String fileName = FSUtils.getFileName(writeStat.getPath(), writeStat.getPartitionPath());
-        return FSUtils.isLogFile(fileName);
-      });
-      Option<Schema> writerSchemaOpt = Option.empty();
-      if (anyLogFiles) {
-        writerSchemaOpt = tryResolveSchemaForTable(dataTableMetaClient);
-      }
-      int maxBufferSize = metadataConfig.getMaxReaderBufferSize();
-      StorageConfiguration storageConfiguration = dataTableMetaClient.getStorageConf();
-      Option<Schema> finalWriterSchemaOpt = writerSchemaOpt;
-      return engineContext.parallelize(allWriteStats, parallelism)
-          .flatMap(writeStat -> {
-            HoodieStorage storage = HoodieStorageUtils.getStorage(new StoragePath(writeStat.getPath()), storageConfiguration);
-            StoragePath fullFilePath = new StoragePath(dataTableMetaClient.getBasePath(), writeStat.getPath());
-            // handle base files
-            if (writeStat.getPath().endsWith(baseFileFormat.getFileExtension())) {
-              return BaseFileRecordParsingUtils.getRecordKeysDeletedOrUpdated(basePath, writeStat, storage).iterator();
-            } else if (FSUtils.isLogFile(fullFilePath)) {
-              // for logs, every entry is either an update or a delete
-              return getRecordKeys(Collections.singletonList(fullFilePath.toString()), dataTableMetaClient, finalWriterSchemaOpt, maxBufferSize, instantTime, true, true).iterator();
-            } else {
-              throw new HoodieIOException("Found unsupported file type " + fullFilePath + ", while generating MDT records");
-            }
-          });
-    } catch (Exception e) {
-      throw new HoodieException("Failed to fetch deleted record keys while preparing MDT records", e);
-    }
   }
 
   @VisibleForTesting
@@ -2407,7 +2356,7 @@ public class HoodieTableMetadataUtil {
         recordKeyToSecondaryKeyForPreviousFileSlice = Collections.emptyMap();
       } else {
         StoragePath previousBaseFile = previousFileSliceForFileId.getBaseFile().map(HoodieBaseFile::getStoragePath).orElse(null);
-        List<String> logFiles = previousFileSliceForFileId.getLogFiles().map(HoodieLogFile::getPath).map(StoragePath::toString).collect(Collectors.toList());
+        List<String> logFiles = previousFileSliceForFileId.getLogFiles().sorted(HoodieLogFile.getLogFileComparator()).map(HoodieLogFile::getPath).map(StoragePath::toString).collect(Collectors.toList());
         recordKeyToSecondaryKeyForPreviousFileSlice =
             getRecordKeyToSecondaryKey(dataMetaClient, engineType, logFiles, tableSchema, partition, Option.ofNullable(previousBaseFile), indexDefinition, instantTime);
       }
@@ -2415,7 +2364,7 @@ public class HoodieTableMetadataUtil {
       FileSlice currentFileSliceForFileId = latestIncludingInflightFileSlices.stream().filter(fs -> fs.getFileId().equals(fileId)).findFirst()
           .orElseThrow(() -> new HoodieException("Could not find any file slice for fileId " + fileId));
       StoragePath currentBaseFile = currentFileSliceForFileId.getBaseFile().map(HoodieBaseFile::getStoragePath).orElse(null);
-      List<String> logFilesIncludingInflight = currentFileSliceForFileId.getLogFiles().map(HoodieLogFile::getPath).map(StoragePath::toString).collect(Collectors.toList());
+      List<String> logFilesIncludingInflight = currentFileSliceForFileId.getLogFiles().sorted(HoodieLogFile.getLogFileComparator()).map(HoodieLogFile::getPath).map(StoragePath::toString).collect(Collectors.toList());
       Map<String, String> recordKeyToSecondaryKeyForCurrentFileSlice =
           getRecordKeyToSecondaryKey(dataMetaClient, engineType, logFilesIncludingInflight, tableSchema, partition, Option.ofNullable(currentBaseFile), indexDefinition, instantTime);
       // Need to find what secondary index record should be deleted, and what should be inserted.
