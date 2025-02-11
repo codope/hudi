@@ -49,13 +49,13 @@ public class Metrics {
   private final List<MetricsReporter> reporters;
   private final String commonMetricPrefix;
   private final String basePath;
-  private boolean initialized = false;
+  private boolean initialized;
   private transient Thread shutdownThread = null;
   private final HoodieStorage storage;
 
-  public Metrics(HoodieMetricsConfig metricConfig, HoodieStorage storage) {
+  public Metrics(HoodieMetricsConfig metricConfig, HoodieStorage storage, MetricRegistry registry) {
     this.storage = storage;
-    registry = new MetricRegistry();
+    this.registry = registry;
     commonMetricPrefix = metricConfig.getMetricReporterMetricsNamePrefix();
     reporters = new ArrayList<>();
     Option<MetricsReporter> defaultReporter = MetricsReporterFactory.createReporter(metricConfig, registry);
@@ -63,7 +63,7 @@ public class Metrics {
     if (StringUtils.nonEmpty(metricConfig.getMetricReporterFileBasedConfigs())) {
       reporters.addAll(addAdditionalMetricsExporters(metricConfig));
     }
-    if (reporters.size() == 0) {
+    if (reporters.isEmpty()) {
       throw new RuntimeException("Cannot initialize Reporters.");
     }
     reporters.forEach(MetricsReporter::start);
@@ -79,12 +79,16 @@ public class Metrics {
   }
 
   public static synchronized Metrics getInstance(HoodieMetricsConfig metricConfig, HoodieStorage storage) {
+    return getInstance(metricConfig, storage, new MetricRegistry());
+  }
+
+  public static synchronized Metrics getInstance(HoodieMetricsConfig metricConfig, HoodieStorage storage, MetricRegistry registry) {
     String basePath = getBasePath(metricConfig);
     if (METRICS_INSTANCE_PER_BASEPATH.containsKey(basePath)) {
       return METRICS_INSTANCE_PER_BASEPATH.get(basePath);
     }
 
-    Metrics metrics = new Metrics(metricConfig, storage);
+    Metrics metrics = new Metrics(metricConfig, storage, registry);
     METRICS_INSTANCE_PER_BASEPATH.put(basePath, metrics);
     return metrics;
   }
@@ -106,14 +110,13 @@ public class Metrics {
         if (reporter.isPresent()) {
           reporterList.add(reporter.get());
         } else {
-          LOG.error(String.format("Could not create reporter using properties path %s base path %s",
-              propPath, metricConfig.getBasePath()));
+          LOG.error("Could not create reporter using properties path {} base path {}", propPath, metricConfig.getBasePath());
         }
       }
     } catch (IOException e) {
       LOG.error("Failed to add MetricsExporters", e);
     }
-    LOG.info("total additional metrics reporters added =" + reporterList.size());
+    LOG.info("total additional metrics reporters added ={}", reporterList.size());
     return reporterList;
   }
 

@@ -104,6 +104,8 @@ public class SparkHoodieBackedTableMetadataWriter extends HoodieBackedTableMetad
       } else {
         registry = Registry.getRegistry("HoodieMetadata");
       }
+      // TODO: Add registry for metadata metrics. The variable `registry` is not yet used in the code. We need to add the metrics to the registry.
+      // However, HoodieMetadataMetrics does not yet support {@code Registry} interface. It only works with {@code MetricsRegistry} by codahale.
       this.metrics = Option.of(new HoodieMetadataMetrics(metadataWriteConfig.getMetricsConfig(), dataMetaClient.getStorage()));
     } else {
       this.metrics = Option.empty();

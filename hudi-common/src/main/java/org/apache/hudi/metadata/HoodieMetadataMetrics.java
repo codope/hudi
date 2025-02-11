@@ -30,8 +30,6 @@ import org.apache.hudi.metrics.Metrics;
 import org.apache.hudi.storage.HoodieStorage;
 
 import com.codahale.metrics.MetricRegistry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -79,13 +77,17 @@ public class HoodieMetadataMetrics implements Serializable {
   public static final String TABLE_SERVICE_EXECUTION_DURATION = "table_service_execution_duration";
   public static final String ASYNC_INDEXER_CATCHUP_TIME = "async_indexer_catchup_time";
 
-  private static final Logger LOG = LoggerFactory.getLogger(HoodieMetadataMetrics.class);
-
+  // TODO: Use Registry interface instead of MetricRegistry. Revisit https://github.com/apache/hudi/pull/10635
   private final transient MetricRegistry metricsRegistry;
   private final transient Metrics metrics;
 
   public HoodieMetadataMetrics(HoodieMetricsConfig metricsConfig, HoodieStorage storage) {
     this.metrics = Metrics.getInstance(metricsConfig, storage);
+    this.metricsRegistry = metrics.getRegistry();
+  }
+
+  public HoodieMetadataMetrics(HoodieMetricsConfig metricsConfig, HoodieStorage storage, MetricRegistry metricRegistry) {
+    this.metrics = Metrics.getInstance(metricsConfig, storage, metricRegistry);
     this.metricsRegistry = metrics.getRegistry();
   }
 
@@ -157,7 +159,6 @@ public class HoodieMetadataMetrics implements Serializable {
   }
 
   protected void incrementMetric(String action, long value) {
-    LOG.debug(String.format("Updating metadata metrics (%s=%d) in %s", action, value, metricsRegistry));
     Option<HoodieGauge<Long>> gaugeOpt = metrics.registerGauge(action);
     gaugeOpt.ifPresent(gauge -> gauge.setValue(gauge.getValue() + value));
   }
