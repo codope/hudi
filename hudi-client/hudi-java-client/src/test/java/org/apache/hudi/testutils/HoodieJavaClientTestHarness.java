@@ -258,7 +258,7 @@ public abstract class HoodieJavaClientTestHarness extends HoodieWriterClientTest
       return;
     }
     // Open up the metadata table again, for syncing
-    try (HoodieTableMetadataWriter writer = JavaHoodieBackedTableMetadataWriter.create(storageConf, writeConfig, context, Option.empty())) {
+    try (HoodieTableMetadataWriter writer = JavaHoodieBackedTableMetadataWriter.create(writeConfig, context)) {
       LOG.info("Successfully synced to metadata table");
     } catch (Exception e) {
       throw new HoodieMetadataException("Error syncing to metadata table.", e);
@@ -400,7 +400,7 @@ public abstract class HoodieJavaClientTestHarness extends HoodieWriterClientTest
 
   protected HoodieBackedTableMetadataWriter metadataWriter(HoodieWriteConfig clientConfig) {
     return (HoodieBackedTableMetadataWriter) JavaHoodieBackedTableMetadataWriter
-        .create(storageConf, clientConfig, new HoodieJavaEngineContext(storageConf), Option.empty());
+        .create(clientConfig, new HoodieJavaEngineContext(storageConf));
   }
 
   private void runFullValidation(HoodieWriteConfig writeConfig,
