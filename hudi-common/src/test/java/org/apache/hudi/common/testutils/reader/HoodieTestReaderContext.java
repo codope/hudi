@@ -185,6 +185,11 @@ public class HoodieTestReaderContext extends HoodieReaderContext<IndexedRecord> 
     };
   }
 
+  @Override
+  public IndexedRecord processRecordWithNewVersion(IndexedRecord currentRecord, Object newRecord) {
+    return null;
+  }
+
   private Object getFieldValueFromIndexedRecord(
       IndexedRecord record,
       Schema recordSchema,

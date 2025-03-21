@@ -269,7 +269,20 @@ public class HoodieSparkFileGroupReaderBasedMergeHandle<T, I, K, O> extends Hood
 
   @Override
   protected void writeIncomingRecords() {
-    // no operation.
+    // no operation in the compaction case.
+  }
+
+  @Override
+  protected void writeEngineManagedRecord(String recordKey, Object record) throws IOException {
+    InternalRow row = (InternalRow) record;
+    HoodieKey key = new HoodieKey(
+        row.getString(HoodieRecord.RECORD_KEY_META_FIELD_ORD),
+        row.getString(HoodieRecord.PARTITION_PATH_META_FIELD_ORD));
+    
+    StructType sparkSchema = AvroConversionUtils.convertAvroSchemaToStructType(writeSchemaWithMetaFields);
+    HoodieSparkRecord sparkRecord = new HoodieSparkRecord(key, row, sparkSchema, false);
+    
+    writeToFile(key, sparkRecord, writeSchemaWithMetaFields, config.getPayloadConfig().getProps(), preserveMetadata);
   }
 
   @Override

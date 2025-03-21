@@ -38,8 +38,25 @@ import static org.apache.hudi.common.table.HoodieTableConfig.PAYLOAD_CLASS_NAME;
 
 /**
  * Every Hoodie table has an implementation of the <code>HoodieRecordPayload</code> This abstracts out callbacks which depend on record specific logic.
+ * 
+ * @deprecated Use {@link org.apache.hudi.common.model.HoodieRecordMerger} and {@link org.apache.hudi.common.table.read.HoodieFileGroupReader} instead.
+ * This interface will be removed in a future release.
+ * 
+ * <p>
+ * <h2>Migration Guide</h2>
+ * <p>
+ * To migrate from HoodieRecordPayload to the new architecture:
+ * <ol>
+ *   <li>For custom payloads with COMMIT_TIME_ORDERING semantics: Use RecordMergeMode.COMMIT_TIME_ORDERING</li>
+ *   <li>For custom payloads with EVENT_TIME_ORDERING semantics: Use RecordMergeMode.EVENT_TIME_ORDERING with custom OrderingComparator</li>
+ *   <li>For complex custom merge logic: Use RecordMergeMode.CUSTOM with the new HoodieRecordMerger API</li>
+ *   <li>Replace HoodieRecord.toIndexedRecord() calls with HoodieFileGroupReader for reading records</li>
+ *   <li>Use engine-native record formats (InternalRow for Spark) instead of Avro conversion</li>
+ * </ol>
+ * </p>
  */
 @PublicAPIClass(maturity = ApiMaturityLevel.STABLE)
+@Deprecated
 public interface HoodieRecordPayload<T extends HoodieRecordPayload> extends Serializable {
 
   /**
@@ -57,8 +74,11 @@ public interface HoodieRecordPayload<T extends HoodieRecordPayload> extends Seri
    * @param properties Payload related properties. For example pass the ordering field(s) name to extract from value in storage.
    *
    * @return the combined value
+   * 
+   * @deprecated Use {@link org.apache.hudi.common.model.HoodieRecordMerger} instead.
    */
   @PublicAPIMethod(maturity = ApiMaturityLevel.STABLE)
+  @Deprecated
   default T preCombine(T oldValue, Properties properties) {
     return preCombine(oldValue);
   }
@@ -97,7 +117,10 @@ public interface HoodieRecordPayload<T extends HoodieRecordPayload> extends Seri
    * @param schema Schema used for record
    * @param properties Payload related properties. For example pass the ordering field(s) name to extract from value in storage.
    * @return new combined/merged value to be written back to storage. EMPTY to skip writing this record.
+   * 
+   * @deprecated Use {@link org.apache.hudi.common.model.HoodieRecordMerger} and {@link org.apache.hudi.common.table.read.HoodieFileGroupReader} instead.
    */
+  @Deprecated
   default Option<IndexedRecord> combineAndGetUpdateValue(IndexedRecord currentValue, Schema schema, Properties properties) throws IOException {
     return combineAndGetUpdateValue(currentValue, schema);
   }
@@ -118,8 +141,11 @@ public interface HoodieRecordPayload<T extends HoodieRecordPayload> extends Seri
    * @param schema Schema used for record
    * @param properties Payload related properties. For example pass the ordering field(s) name to extract from value in storage.
    * @return the {@link IndexedRecord} to be inserted.
+   * 
+   * @deprecated Use {@link org.apache.hudi.common.model.HoodieRecordMerger} and engine-native records instead.
    */
   @PublicAPIMethod(maturity = ApiMaturityLevel.STABLE)
+  @Deprecated
   default Option<IndexedRecord> getInsertValue(Schema schema, Properties properties) throws IOException {
     return getInsertValue(schema);
   }

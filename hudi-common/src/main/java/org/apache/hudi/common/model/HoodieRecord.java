@@ -45,7 +45,13 @@ import java.util.stream.IntStream;
 
 /**
  * A Single Record managed by Hoodie.
+ * 
+ * @deprecated This API will be replaced with engine-native record representations 
+ * (InternalRow/Row/Dataset for Spark) and the new {@link org.apache.hudi.common.table.read.HoodieFileGroupReader}
+ * based processing. The transition will focus on unified, engine-native write paths that process
+ * enriched records with keys, ordering fields, and delete markers.
  */
+@Deprecated
 public abstract class HoodieRecord<T> implements HoodieRecordCompatibilityInterface, KryoSerializable, Serializable {
 
   private static final long serialVersionUID = 3015229555587559252L;

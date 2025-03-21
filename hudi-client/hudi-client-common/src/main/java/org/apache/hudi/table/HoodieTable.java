@@ -50,6 +50,7 @@ import org.apache.hudi.common.table.HoodieTableConfig;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
 import org.apache.hudi.common.table.TableSchemaResolver;
+import org.apache.hudi.common.table.read.HoodieFileGroupIO;
 import org.apache.hudi.common.table.timeline.HoodieActiveTimeline;
 import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.table.timeline.HoodieTimeline;
@@ -68,10 +69,10 @@ import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.common.util.ValidationUtils;
 import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.exception.HoodieDuplicateDataFileDetectedException;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
 import org.apache.hudi.exception.HoodieInsertException;
-import org.apache.hudi.exception.HoodieDuplicateDataFileDetectedException;
 import org.apache.hudi.exception.HoodieMetadataException;
 import org.apache.hudi.exception.HoodieUpsertException;
 import org.apache.hudi.exception.SchemaCompatibilityException;
@@ -141,6 +142,9 @@ public abstract class HoodieTable<T, I, K, O> implements Serializable {
   private final InstantFileNameGenerator instantFileNameGenerator;
   private final InstantFileNameParser instantFileNameParser;
   private final boolean isMetadataTable;
+  
+  // Factory to create file group IO instances for different partition paths
+  private transient Function<String, HoodieFileGroupIO> fileGroupIOFactory;
 
   private transient FileSystemViewManager viewManager;
   protected final transient HoodieEngineContext context;
@@ -979,6 +983,32 @@ public abstract class HoodieTable<T, I, K, O> implements Serializable {
     // This is to handle scenarios where this is called at the executor tasks which do not have access
     // to engine context, and it ends up being null (as its not serializable and marked transient here).
     return context == null ? new HoodieLocalEngineContext(metaClient.getStorageConf()) : context;
+  }
+  
+  /**
+   * Sets the factory function for creating {@link HoodieFileGroupIO} instances.
+   * This function is used to provide partition-specific file group IO implementations
+   * that can be customized for different partition types (e.g. metadata partitions).
+   *
+   * @param factory A function that takes a pair of (partitionPath, basePath) and returns a {@link HoodieFileGroupIO} instance
+   */
+  public void setFileGroupIOFactory(Function<String, HoodieFileGroupIO> factory) {
+    this.fileGroupIOFactory = factory;
+  }
+  
+  /**
+   * Creates a {@link HoodieFileGroupIO} instance for the given partition path.
+   * If a factory function is set, it will be used to create the instance.
+   * Otherwise, returns null.
+   *
+   * @param partitionPath The partition path
+   * @return A {@link HoodieFileGroupIO} instance, or null if no factory is set
+   */
+  public HoodieFileGroupIO createFileGroupIO(String partitionPath) {
+    if (fileGroupIOFactory != null) {
+      return fileGroupIOFactory.apply(partitionPath);
+    }
+    return null;
   }
 
   /**

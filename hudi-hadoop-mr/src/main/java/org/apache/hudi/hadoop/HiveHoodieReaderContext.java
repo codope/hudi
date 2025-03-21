@@ -293,6 +293,11 @@ public class HiveHoodieReaderContext extends HoodieReaderContext<ArrayWritable> 
     return value;
   }
 
+  @Override
+  public ArrayWritable processRecordWithNewVersion(ArrayWritable currentRecord, Object newRecord) {
+    return null;
+  }
+
   public UnaryOperator<ArrayWritable> reverseProjectRecord(Schema from, Schema to) {
     return HoodieArrayWritableAvroUtils.reverseProject(from, to);
   }

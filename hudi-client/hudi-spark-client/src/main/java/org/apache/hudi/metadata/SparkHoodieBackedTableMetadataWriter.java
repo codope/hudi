@@ -18,15 +18,19 @@
 
 package org.apache.hudi.metadata;
 
-import org.apache.hudi.index.HoodieSparkIndexClient;
 import org.apache.hudi.client.BaseHoodieWriteClient;
 import org.apache.hudi.client.SparkRDDWriteClient;
 import org.apache.hudi.client.common.HoodieSparkEngineContext;
 import org.apache.hudi.client.utils.SparkMetadataWriterUtils;
+import org.apache.hudi.common.config.RecordMergeMode;
 import org.apache.hudi.common.data.HoodieData;
 import org.apache.hudi.common.data.HoodiePairData;
+import org.apache.hudi.common.engine.DefaultDeleteMarkerEvaluator;
+import org.apache.hudi.common.engine.DefaultOrderingComparator;
+import org.apache.hudi.common.engine.DeleteMarkerEvaluator;
 import org.apache.hudi.common.engine.EngineType;
 import org.apache.hudi.common.engine.HoodieEngineContext;
+import org.apache.hudi.common.engine.OrderingComparator;
 import org.apache.hudi.common.metrics.Registry;
 import org.apache.hudi.common.model.HoodieColumnRangeMetadata;
 import org.apache.hudi.common.model.HoodieCommitMetadata;
@@ -41,6 +45,7 @@ import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.data.HoodieJavaRDD;
+import org.apache.hudi.index.HoodieSparkIndexClient;
 import org.apache.hudi.index.expression.HoodieSparkExpressionIndex;
 import org.apache.hudi.index.expression.HoodieSparkExpressionIndex.ExpressionIndexComputationMetadata;
 import org.apache.hudi.metrics.DistributedRegistry;
@@ -88,6 +93,9 @@ public class SparkHoodieBackedTableMetadataWriter extends HoodieBackedTableMetad
                                                  HoodieWriteConfig writeConfig,
                                                  HoodieEngineContext context,
                                                  Option<String> inflightInstantTimestamp) {
+    // Configure the metadata table write config to use CUSTOM merge mode with MetadataRecordMerger
+    writeConfig.setValue(HoodieWriteConfig.RECORD_MERGE_MODE, RecordMergeMode.CUSTOM.name());
+    
     return new SparkHoodieBackedTableMetadataWriter(
         conf, writeConfig, EAGER, context, inflightInstantTimestamp);
   }
@@ -97,6 +105,9 @@ public class SparkHoodieBackedTableMetadataWriter extends HoodieBackedTableMetad
                                                  HoodieFailedWritesCleaningPolicy failedWritesCleaningPolicy,
                                                  HoodieEngineContext context,
                                                  Option<String> inflightInstantTimestamp) {
+    // Configure the metadata table write config to use CUSTOM merge mode with MetadataRecordMerger
+    writeConfig.setValue(HoodieWriteConfig.RECORD_MERGE_MODE, RecordMergeMode.CUSTOM.name());
+    
     return new SparkHoodieBackedTableMetadataWriter(
         conf, writeConfig, failedWritesCleaningPolicy, context, inflightInstantTimestamp);
   }
@@ -223,7 +234,30 @@ public class SparkHoodieBackedTableMetadataWriter extends HoodieBackedTableMetad
 
   @Override
   protected HoodieTable getTable(HoodieWriteConfig writeConfig, HoodieTableMetaClient metaClient) {
-    return HoodieSparkTable.create(writeConfig, engineContext, metaClient);
+    // Set up the default OrderingComparator and DeleteMarkerEvaluator
+    OrderingComparator orderingComparator = new DefaultOrderingComparator();
+    // TODO: Implement a custom DeleteMarkerEvaluator for MetadataTable
+    DeleteMarkerEvaluator deleteMarkerEvaluator = new DefaultDeleteMarkerEvaluator("", Option.empty());
+    
+    // Configure table to use our MetadataRecordMerger and HoodieMetadataFileGroupIO
+    HoodieSparkTable table = HoodieSparkTable.create(writeConfig, engineContext, metaClient);
+    
+    // Register our record merger with the table's CustomRecordMerger
+    writeConfig.setRecordMergerClass(SparkMetadataRecordMerger.class.getName());
+    
+    // Configure the table to create MetadataFileGroupIO for each partition type
+    table.setFileGroupIOFactory((partitionPath) -> {
+      MetadataPartitionType partitionType = MetadataPartitionType.fromPartitionPath((String) partitionPath);
+      return HoodieMetadataFileGroupIO.create(
+          metaClient,
+          engineContext,
+          metadataWriteConfig.getEngineType(),
+          deleteMarkerEvaluator, 
+          orderingComparator, 
+          partitionType);
+    });
+    
+    return table;
   }
 
   @Override

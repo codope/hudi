@@ -51,5 +51,17 @@ public interface HoodieRecordCompatibilityInterface {
    */
   HoodieRecord truncateRecordKey(Schema recordSchema, Properties props, String keyFieldName) throws IOException;
 
+  /**
+   * Convert the record to an IndexedRecord using the Avro schema.
+   * 
+   * @param recordSchema Schema used for record
+   * @param props Properties for the record
+   * @return The converted indexed record if conversion is successful
+   * @throws IOException if conversion fails
+   * 
+   * @deprecated Use {@link org.apache.hudi.common.table.read.HoodieFileGroupReader} instead
+   * with engine-native record formats.
+   */
+  @Deprecated
   Option<HoodieAvroIndexedRecord> toIndexedRecord(Schema recordSchema, Properties props) throws IOException;
 }

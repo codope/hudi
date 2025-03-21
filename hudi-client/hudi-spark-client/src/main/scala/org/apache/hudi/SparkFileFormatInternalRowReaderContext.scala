@@ -258,6 +258,16 @@ class SparkFileFormatInternalRowReaderContext(parquetFileReader: SparkParquetRea
       }.asInstanceOf[ClosableIterator[InternalRow]]
     }
   }
+
+  /**
+   * Processes a record with a new version, merging them based on ordering values and other criteria.
+   * This is used in place of the HoodieRecordPayload-based merging.
+   *
+   * @param currentRecord The current record from storage
+   * @param newRecord     The new record to be potentially merged (can be HoodieRecord or engine-specific type)
+   * @return The merged record, or null if the record should be deleted
+   */
+  override def processRecordWithNewVersion(currentRecord: InternalRow, newRecord: Any): InternalRow = ???
 }
 
 object SparkFileFormatInternalRowReaderContext {

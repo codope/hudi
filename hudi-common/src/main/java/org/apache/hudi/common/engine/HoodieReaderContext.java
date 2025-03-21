@@ -67,6 +67,10 @@ public abstract class HoodieReaderContext<T> implements Closeable {
   private Boolean hasBootstrapBaseFile = null;
   private Boolean needsBootstrapMerge = null;
   private Boolean shouldMergeUseRecordPosition = null;
+  
+  // For ordering and delete marker evaluation
+  private OrderingComparator orderingComparator = null;
+  private DeleteMarkerEvaluator deleteMarkerEvaluator = null;
 
   // for encoding and decoding schemas to the spillable map
   private final LocalAvroSchemaCache localAvroSchemaCache = LocalAvroSchemaCache.getInstance();
@@ -151,6 +155,7 @@ public abstract class HoodieReaderContext<T> implements Closeable {
   public static final String INTERNAL_META_OPERATION = "_3";
   public static final String INTERNAL_META_INSTANT_TIME = "_4";
   public static final String INTERNAL_META_SCHEMA_ID = "_5";
+  public static final String INTERNAL_META_DELETE_MARKER = "_6";
 
   /**
    * Gets the record iterator based on the type of engine-specific record representation from the
@@ -393,6 +398,86 @@ public abstract class HoodieReaderContext<T> implements Closeable {
     return false;
   }
 
+  /**
+   * Gets the OrderingComparator to be used for record merging.
+   * 
+   * @return The OrderingComparator instance
+   */
+  public OrderingComparator getOrderingComparator() {
+    if (orderingComparator == null) {
+      orderingComparator = new DefaultOrderingComparator();
+    }
+    return orderingComparator;
+  }
+  
+  /**
+   * Sets a custom OrderingComparator implementation.
+   * 
+   * @param comparator The OrderingComparator to use
+   */
+  public void setOrderingComparator(OrderingComparator comparator) {
+    this.orderingComparator = comparator;
+  }
+  
+  /**
+   * Gets the DeleteMarkerEvaluator to be used for detection of delete records.
+   * 
+   * @return The DeleteMarkerEvaluator instance
+   */
+  public DeleteMarkerEvaluator getDeleteMarkerEvaluator() {
+    return deleteMarkerEvaluator;
+  }
+  
+  /**
+   * Sets a custom DeleteMarkerEvaluator implementation.
+   * 
+   * @param evaluator The DeleteMarkerEvaluator to use
+   */
+  public void setDeleteMarkerEvaluator(DeleteMarkerEvaluator evaluator) {
+    this.deleteMarkerEvaluator = evaluator;
+  }
+  
+  /**
+   * Determines if a record is a delete marker using the configured DeleteMarkerEvaluator.
+   * 
+   * @param record The record to evaluate
+   * @return true if the record is a delete marker, false otherwise
+   */
+  public boolean isDeleteMarker(T record) {
+    if (deleteMarkerEvaluator != null) {
+      return deleteMarkerEvaluator.isDelete(record);
+    }
+    
+    // Check if the metadata contains a delete marker flag
+    Map<String, Object> metadata = generateMetadataForRecord(record, null);
+    if (metadata.containsKey(INTERNAL_META_DELETE_MARKER)) {
+      return (boolean) metadata.get(INTERNAL_META_DELETE_MARKER);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Compare two ordering values using the configured OrderingComparator.
+   * 
+   * @param value1 First ordering value
+   * @param value2 Second ordering value
+   * @return negative if value1 < value2, 0 if equal, positive if value1 > value2
+   */
+  public int compareOrderingValues(Object value1, Object value2) {
+    return getOrderingComparator().compare(value1, value2);
+  }
+  
+  /**
+   * Processes a record with a new version, merging them based on ordering values and other criteria.
+   * This is used in place of the HoodieRecordPayload-based merging.
+   * 
+   * @param currentRecord The current record from storage
+   * @param newRecord The new record to be potentially merged (can be HoodieRecord or engine-specific type)
+   * @return The merged record, or null if the record should be deleted
+   */
+  public abstract T processRecordWithNewVersion(T currentRecord, Object newRecord);
+  
   /**
    * Encodes the given avro schema for efficient serialization.
    */

@@ -18,10 +18,14 @@
 
 package org.apache.hudi.io;
 
+import org.apache.hudi.avro.HoodieAvroUtils;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.config.TypedProperties;
+import org.apache.hudi.common.engine.HoodieIOContext;
+import org.apache.hudi.common.engine.HoodieReaderContext;
 import org.apache.hudi.common.engine.TaskContextSupplier;
 import org.apache.hudi.common.fs.FSUtils;
+import org.apache.hudi.common.model.FileSlice;
 import org.apache.hudi.common.model.HoodieBaseFile;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieOperation;
@@ -33,10 +37,12 @@ import org.apache.hudi.common.model.HoodieWriteStat.RuntimeStats;
 import org.apache.hudi.common.model.IOType;
 import org.apache.hudi.common.model.MetadataValues;
 import org.apache.hudi.common.serialization.DefaultSerializer;
+import org.apache.hudi.common.table.read.HoodieFileGroupReader;
 import org.apache.hudi.common.util.DefaultSizeEstimator;
 import org.apache.hudi.common.util.HoodieRecordSizeEstimator;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.ValidationUtils;
+import org.apache.hudi.common.util.collection.ClosableIterator;
 import org.apache.hudi.common.util.collection.ExternalSpillableMap;
 import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.config.HoodieWriteConfig;
@@ -116,6 +122,9 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
   protected Option<BaseKeyGenerator> keyGeneratorOpt;
   protected HoodieBaseFile baseFileToMerge;
 
+  // Used for engine-native record processing
+  protected HoodieIOContext ioContext = null;
+
   protected Option<String[]> partitionFields = Option.empty();
   protected Object[] partitionValues = new Object[0];
 
@@ -161,6 +170,24 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
   public HoodieMergeHandle(HoodieWriteConfig config, String instantTime, String partitionPath,
                            String fileId, HoodieTable<T, I, K, O> hoodieTable, TaskContextSupplier taskContextSupplier) {
     super(config, instantTime, partitionPath, fileId, hoodieTable, taskContextSupplier);
+  }
+
+  /**
+   * Constructor that accepts a HoodieIOContext for engine-native record processing.
+   *
+   * @param config              Hoodie write config
+   * @param instantTime         Instant time for the commit
+   * @param partitionPath       Partition path
+   * @param fileId              File ID
+   * @param hoodieTable         Hoodie table
+   * @param taskContextSupplier Task context supplier
+   * @param ioContext           Engine-specific I/O context for record processing
+   */
+  public HoodieMergeHandle(HoodieWriteConfig config, String instantTime, String partitionPath,
+                           String fileId, HoodieTable<T, I, K, O> hoodieTable,
+                           TaskContextSupplier taskContextSupplier, HoodieIOContext ioContext) {
+    super(config, instantTime, partitionPath, fileId, hoodieTable, taskContextSupplier);
+    this.ioContext = ioContext;
   }
 
   private void validateAndSetAndKeyGenProps(Option<BaseKeyGenerator> keyGeneratorOpt, boolean populateMetaFields) {
@@ -361,7 +388,10 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
 
   /**
    * Go through an old record. Here if we detect a newer version shows up, we write the new one to the file.
+   *
+   * @deprecated Use {@link #writeWithFileGroupReader} with {@link org.apache.hudi.common.table.read.HoodieFileGroupReader} instead
    */
+  @Deprecated
   public void write(HoodieRecord<T> oldRecord) {
     // Use schema with metadata files no matter whether 'hoodie.populate.meta.fields' is enabled
     // to avoid unnecessary rewrite. Even with metadata table(whereas the option 'hoodie.populate.meta.fields' is configured as false),
@@ -410,6 +440,139 @@ public class HoodieMergeHandle<T, I, K, O> extends HoodieWriteHandle<T, I, K, O>
         throw new HoodieUpsertException(errMsg, e);
       }
       recordsWritten++;
+    }
+  }
+
+  /**
+   * Process records using the FileGroupReader approach. This method allows for more efficient
+   * processing of records by working directly with engine-native record formats.
+   *
+   * @param fileSlice     The file slice to read records from
+   * @param readerContext The reader context for the engine (Spark, Flink, etc.)
+   */
+  protected void writeWithFileGroupReader(FileSlice fileSlice, HoodieReaderContext readerContext) {
+    Schema readSchema = writeSchemaWithMetaFields;
+    Schema writeSchema = preserveMetadata ? writeSchemaWithMetaFields : this.writeSchema;
+    TypedProperties props = config.getPayloadConfig().getProps();
+
+    try (HoodieFileGroupReader fileGroupReader = createFileGroupReader(
+        fileSlice, readerContext, readSchema, writeSchema, props)) {
+
+      fileGroupReader.initRecordIterators();
+
+      try (HoodieFileGroupReader.HoodieFileGroupReaderIterator recordIterator =
+               fileGroupReader.getClosableIterator()) {
+
+        while (recordIterator.hasNext()) {
+          Object record = recordIterator.next();
+          String recordKey = readerContext.getRecordKey(record, HoodieAvroUtils.getRecordKeySchema());
+          boolean copyOldRecord = true;
+
+          if (keyToNewRecords.containsKey(recordKey)) {
+            // We have an update for this record
+            HoodieRecord<T> newRecord = keyToNewRecords.get(recordKey).newInstance();
+            try {
+              // Use the engine-specific merger based on record type
+              Object mergedRecord = readerContext.processRecordWithNewVersion(record, newRecord);
+              if (mergedRecord != null) {
+                // Write the merged record
+                writeEngineManagedRecord(recordKey, mergedRecord);
+                copyOldRecord = false;
+              }
+              writtenRecordKeys.add(recordKey);
+            } catch (Exception e) {
+              throw new HoodieUpsertException("Failed to merge records with FileGroupReader", e);
+            }
+          }
+
+          if (copyOldRecord) {
+            // If no update or merge failed, copy the old record
+            writeEngineManagedRecord(recordKey, record);
+            recordsWritten++;
+          }
+        }
+      }
+    } catch (IOException e) {
+      throw new HoodieUpsertException("Failed to process records with FileGroupReader", e);
+    }
+  }
+
+  /**
+   * Write an engine-managed record to the output file
+   *
+   * @param recordKey The record key
+   * @param record    The engine-native record object
+   * @throws IOException if write fails
+   */
+  protected void writeEngineManagedRecord(String recordKey, Object record) throws IOException {
+    // This is implemented by engine-specific subclasses (Spark, Flink, etc.)
+    throw new UnsupportedOperationException(
+        "writeEngineManagedRecord must be implemented by engine-specific subclasses");
+  }
+
+  /**
+   * Process a file group using HoodieFileGroupReader for direct access to engine-native records.
+   *
+   * @param <R>           The engine-specific record type
+   * @param fileSlice     The file slice to process
+   * @param readerContext The reader context for the engine
+   */
+  protected <R> void processFileGroupWithReader(FileSlice fileSlice, HoodieReaderContext<R> readerContext) {
+    Schema readSchema = writeSchemaWithMetaFields;
+    Schema writeSchema = preserveMetadata ? writeSchemaWithMetaFields : this.writeSchema;
+    TypedProperties props = config.getPayloadConfig().getProps();
+
+    try {
+      // Create the reader
+      HoodieFileGroupReader<R> fileGroupReader = createFileGroupReader(
+          fileSlice, readerContext, readSchema, writeSchema, props);
+
+      // Initialize the reader
+      fileGroupReader.initRecordIterators();
+
+      try (ClosableIterator<R> recordIterator = fileGroupReader.getClosableIterator()) {
+        while (recordIterator.hasNext()) {
+          R record = recordIterator.next();
+          String recordKey = readerContext.getRecordKey(record, HoodieAvroUtils.getRecordKeySchema());
+          boolean copyOldRecord = true;
+
+          if (keyToNewRecords.containsKey(recordKey)) {
+            // We have an update for this record
+            HoodieRecord<T> newRecord = keyToNewRecords.get(recordKey).newInstance();
+            try {
+              // Use the reader context to merge records
+              R mergedRecord = readerContext.processRecordWithNewVersion(record, newRecord);
+              if (mergedRecord != null) {
+                // Write the merged record
+                writeEngineManagedRecord(recordKey, mergedRecord);
+                copyOldRecord = false;
+                updatedRecordsWritten++;
+              } else {
+                // Record was deleted
+                recordsDeleted++;
+              }
+              writtenRecordKeys.add(recordKey);
+            } catch (Exception e) {
+              throw new HoodieUpsertException("Failed to merge records with FileGroupReader", e);
+            }
+          }
+
+          if (copyOldRecord) {
+            // If no update or merge failed, copy the old record
+            writeEngineManagedRecord(recordKey, record);
+            recordsWritten++;
+          }
+        }
+      } finally {
+        // Close the reader
+        fileGroupReader.close();
+      }
+
+      // Write any new records that weren't in the original file
+      writeIncomingRecords();
+
+    } catch (IOException e) {
+      throw new HoodieUpsertException("Failed to process records with FileGroupReader", e);
     }
   }
 

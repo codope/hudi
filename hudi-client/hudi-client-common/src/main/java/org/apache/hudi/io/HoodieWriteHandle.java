@@ -21,7 +21,9 @@ package org.apache.hudi.io;
 import org.apache.hudi.avro.AvroSchemaCache;
 import org.apache.hudi.avro.HoodieAvroUtils;
 import org.apache.hudi.client.WriteStatus;
+import org.apache.hudi.common.config.HoodieReaderConfig;
 import org.apache.hudi.common.config.TypedProperties;
+import org.apache.hudi.common.engine.HoodieReaderContext;
 import org.apache.hudi.common.engine.TaskContextSupplier;
 import org.apache.hudi.common.fs.FSUtils;
 import org.apache.hudi.common.model.FileSlice;
@@ -35,12 +37,14 @@ import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.HoodieTableVersion;
 import org.apache.hudi.common.table.log.HoodieLogFormat;
 import org.apache.hudi.common.table.log.LogFileCreationCallback;
+import org.apache.hudi.common.table.read.HoodieFileGroupReader;
 import org.apache.hudi.common.util.HoodieTimer;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.ReflectionUtils;
 import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
+import org.apache.hudi.internal.schema.utils.SerDeHelper;
 import org.apache.hudi.storage.HoodieStorage;
 import org.apache.hudi.storage.StoragePath;
 import org.apache.hudi.table.HoodieTable;
@@ -296,12 +300,52 @@ public abstract class HoodieWriteHandle<T, I, K, O> extends HoodieIOHandle<T, I,
     };
   }
 
+  /**
+   * @deprecated Use {@link #createFileGroupReader} instead.
+   */
+  @Deprecated
   protected static Option<IndexedRecord> toAvroRecord(HoodieRecord record, Schema writerSchema, TypedProperties props) {
     try {
       return record.toIndexedRecord(writerSchema, props).map(HoodieAvroIndexedRecord::getData);
     } catch (IOException e) {
       LOG.error("Fail to get indexRecord from " + record, e);
       return Option.empty();
+    }
+  }
+
+  /**
+   * Creates a HoodieFileGroupReader for processing records.
+   *
+   * @param fileSlice     The file slice to read from
+   * @param readerContext The reader context for the engine (Spark, Flink, etc.)
+   * @param readSchema    Schema to use when reading records
+   * @param writeSchema   Schema to use when writing records
+   * @param props         Properties for the reader
+   * @return The HoodieFileGroupReader to use for processing records
+   */
+  protected HoodieFileGroupReader createFileGroupReader(
+      FileSlice fileSlice,
+      HoodieReaderContext readerContext,
+      Schema readSchema,
+      Schema writeSchema,
+      TypedProperties props) {
+    try {
+      return new HoodieFileGroupReader<>(
+          readerContext,
+          storage,
+          config.getBasePath().toString(),
+          instantTime,
+          fileSlice,
+          readSchema,
+          writeSchema,
+          isNullOrEmpty(config.getInternalSchema()) ? Option.empty() : SerDeHelper.fromJson(config.getInternalSchema()),
+          hoodieTable.getMetaClient(),
+          props,
+          0,
+          Long.MAX_VALUE,
+          config.getBooleanOrDefault(HoodieReaderConfig.MERGE_USE_RECORD_POSITIONS));
+    } catch (Exception e) {
+      throw new HoodieException("Failed to initialize FileGroupReader for fileId: " + fileId, e);
     }
   }
 }
