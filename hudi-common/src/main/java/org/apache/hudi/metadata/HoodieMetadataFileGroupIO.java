@@ -35,7 +35,7 @@ import java.util.List;
  * Specialized implementation of {@link HoodieFileGroupIO} for the metadata table.
  * This handles metadata-specific merge semantics for different partition types.
  */
-public abstract class HoodieMetadataFileGroupIO extends HoodieFileGroupIO {
+public abstract class HoodieMetadataFileGroupIO extends HoodieFileGroupIO<HoodieRecord> {
 
   /**
    * The merger used to merge metadata records. This will be a concrete implementation

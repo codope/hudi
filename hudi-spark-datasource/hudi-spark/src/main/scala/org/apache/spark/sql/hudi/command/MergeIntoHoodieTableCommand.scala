@@ -25,12 +25,14 @@ import org.apache.hudi.avro.HoodieAvroUtils
 import org.apache.hudi.common.config.RecordMergeMode
 import org.apache.hudi.common.model.{HoodieAvroRecordMerger, HoodieRecordMerger}
 import org.apache.hudi.common.table.HoodieTableConfig
+import org.apache.hudi.common.table.read.FileGroupIOFactory
 import org.apache.hudi.common.util.ConfigUtils.getStringWithAltKeys
 import org.apache.hudi.common.util.StringUtils
 import org.apache.hudi.config.HoodieWriteConfig
 import org.apache.hudi.config.HoodieWriteConfig.{AVRO_SCHEMA_VALIDATE_ENABLE, SCHEMA_ALLOW_AUTO_EVOLUTION_COLUMN_DROP, TBL_NAME, WRITE_PARTIAL_UPDATE_SCHEMA}
 import org.apache.hudi.exception.{HoodieException, HoodieNotSupportedException}
 import org.apache.hudi.hive.HiveSyncConfigHolder
+import org.apache.hudi.io.storage.row.{SparkHoodieExpressionFileGroupIO, SparkHoodieIOContext}
 import org.apache.hudi.sync.common.HoodieSyncConfig
 import org.apache.hudi.util.JFunction.scalaFunction1Noop
 
@@ -473,6 +475,52 @@ case class MergeIntoHoodieTableCommand(mergeInto: MergeIntoTable) extends Hoodie
     writeParams ++= Seq(
       PAYLOAD_ORIGINAL_AVRO_PAYLOAD -> hoodieCatalogTable.tableConfig.getPayloadClass
     )
+    
+    // Check if we should use the new FileGroupIO approach
+    val useFileGroupIO = writeParams.getOrElse(USE_FILE_GROUP_IO, DEFAULT_USE_FILE_GROUP_IO).toBoolean
+    
+    if (useFileGroupIO) {
+      // When using FileGroupIO, we don't need ExpressionPayload
+      // Remove ExpressionPayload and use standard merge mode
+      val hasOrderingField = !StringUtils.isNullOrEmpty(parameters.getOrElse(PRECOMBINE_FIELD.key, ""))
+      val mergeMode = if (hasOrderingField) {
+        RecordMergeMode.EVENT_TIME_ORDERING.name()
+      } else {
+        RecordMergeMode.COMMIT_TIME_ORDERING.name()
+      }
+      
+      // Create FileGroupIOFactory to use SparkHoodieExpressionFileGroupIO
+      val updateConditionAndAssignments = updatingActions.map(a => (a.condition, a.assignments))
+      val insertConditionAndAssignments = insertingActions.map(a => (a.condition, a.assignments))
+      val deleteCondition = deletingActions.headOption.map(_.condition).getOrElse(None)
+      
+      // Serialize expressions for transport to executor
+      val serializedUpdateConditionAndAssignments = serializeConditionsAndAssignments(updateConditionAndAssignments)
+      val serializedInsertConditionAndAssignments = serializeConditionsAndAssignments(insertConditionAndAssignments)
+      val serializedDeleteCondition = deleteCondition.map(c => encodeAsBase64String(bindReferences(c)))
+      
+      // Add the serialized expressions to the write parameters
+      writeParams ++= Seq(
+        FILE_GROUP_IO_UPDATE_EXPRESSIONS -> serializedUpdateConditionAndAssignments,
+        FILE_GROUP_IO_INSERT_EXPRESSIONS -> serializedInsertConditionAndAssignments
+      )
+      
+      serializedDeleteCondition.foreach { condition =>
+        writeParams += (FILE_GROUP_IO_DELETE_EXPRESSIONS -> condition)
+      }
+      
+      // Set merge mode based on presence of ordering field
+      writeParams += (RECORD_MERGE_MODE.key() -> mergeMode)
+      
+      // Remove ExpressionPayload-specific parameters 
+      writeParams -= PAYLOAD_CLASS_NAME.key
+      writeParams -= PAYLOAD_UPDATE_CONDITION_AND_ASSIGNMENTS
+      writeParams -= PAYLOAD_INSERT_CONDITION_AND_ASSIGNMENTS
+      writeParams -= PAYLOAD_DELETE_CONDITION
+      
+      // Add flag to indicate we're using FileGroupIO
+      writeParams += (USE_FILE_GROUP_IO -> "true")
+    }
 
     val (success, _, _, _, _, _) = HoodieSparkSqlWriter.write(sparkSession.sqlContext, SaveMode.Append, writeParams, sourceDF)
     if (!success) {
@@ -571,6 +619,26 @@ case class MergeIntoHoodieTableCommand(mergeInto: MergeIntoTable) extends Hoodie
    * corresponding assignments, so that the generated records for updates only contain
    * updated fields, to be written to the log files in a MOR table.
    */
+  /**
+   * Helper method to serialize conditions and assignments for the new FileGroupIO approach.
+   * This is used when USE_FILE_GROUP_IO is enabled.
+   */
+  private def serializeConditionsAndAssignments(conditionsAndAssignments: Seq[(Option[Expression], Seq[Assignment])]): String = {
+    val boundConditionsAndAssignments = conditionsAndAssignments.map {
+      case (condition, assignments) => 
+        val boundCondition = condition.map(bindReferences).getOrElse(Literal.create(true, BooleanType))
+        val boundAssignments = assignments.map {
+          case Assignment(attr: Attribute, value) =>
+            val boundExpr = bindReferences(value)
+            // Cast if needed and create alias with target column name
+            Alias(castIfNeeded(boundExpr, attr.dataType), attr.name)()
+        }
+        boundCondition -> boundAssignments
+    }.toMap
+    
+    encodeAsBase64String(boundConditionsAndAssignments)
+  }
+  
   private def serializeConditionalAssignments(conditionalAssignments: Seq[(Option[Expression], Seq[Assignment])],
                                               partialAssignmentMode: Option[PartialAssignmentMode] = None,
                                               keepUpdatedFieldsOnly: Boolean,
@@ -936,6 +1004,15 @@ object MergeIntoHoodieTableCommand {
   val userGuideString: String = "To use the MERGE INTO statement on this MOR table, " +
     "please specify `UPDATE SET *` as the update statement to update all columns, " +
     "and set `" + DataSourceWriteOptions.ENABLE_MERGE_INTO_PARTIAL_UPDATES.key + "=false`."
+    
+  // Configuration to enable the new FileGroupIO-based approach for MERGE INTO
+  val USE_FILE_GROUP_IO = "hoodie.filegroup.io.enabled"
+  val DEFAULT_USE_FILE_GROUP_IO = "false"
+  
+  // Constants for serialized expressions
+  val FILE_GROUP_IO_UPDATE_EXPRESSIONS = "hoodie.filegroup.io.expressions.update"
+  val FILE_GROUP_IO_INSERT_EXPRESSIONS = "hoodie.filegroup.io.expressions.insert"
+  val FILE_GROUP_IO_DELETE_EXPRESSIONS = "hoodie.filegroup.io.expressions.delete"
 
   object CoercedAttributeReference {
     def unapply(expr: Expression): Option[AttributeReference] = {

@@ -42,7 +42,7 @@ import java.util.List;
  * This is an enhanced version of HoodieFileGroupReader that adds write capabilities and works
  * with engine-native record formats directly, eliminating the need for Avro conversion.
  */
-public abstract class HoodieFileGroupIO implements Closeable {
+public abstract class HoodieFileGroupIO<I> implements Closeable {
 
   // The underlying reader context used for reading records (engine specific)
   private final HoodieIOContext ioContext;
@@ -113,14 +113,14 @@ public abstract class HoodieFileGroupIO implements Closeable {
   /**
    * Get the ordering comparator.
    */
-  public OrderingComparator getOrderingComparator() {
+  public OrderingComparator<I> getOrderingComparator() {
     return orderingComparator;
   }
 
   /**
    * Get the delete marker evaluator.
    */
-  public DeleteMarkerEvaluator getDeleteMarkerEvaluator() {
+  public DeleteMarkerEvaluator<I> getDeleteMarkerEvaluator() {
     return deleteMarkerEvaluator;
   }
 

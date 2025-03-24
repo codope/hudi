@@ -22,8 +22,8 @@ package org.apache.hudi.common.engine;
 /**
  * Default implementation of OrderingComparator that uses natural ordering with null handling.
  */
-public class DefaultOrderingComparator implements OrderingComparator {
-  
+public class DefaultOrderingComparator<I> implements OrderingComparator<I> {
+
   @Override
   public int compare(Object o1, Object o2) {
     // Natural ordering with null handling

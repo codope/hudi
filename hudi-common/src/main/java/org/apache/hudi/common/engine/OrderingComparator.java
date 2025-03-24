@@ -25,7 +25,7 @@ import java.io.Serializable;
  * Interface for comparing ordering values between records.
  * Used to replace payload-based ordering with a more direct approach.
  */
-public interface OrderingComparator extends Serializable {
+public interface OrderingComparator<I> extends Serializable {
   
   /**
    * Compare two ordering values.

@@ -25,35 +25,35 @@ import org.apache.hudi.common.util.Option;
  * Default implementation of DeleteMarkerEvaluator that uses a configurable field name
  * to determine if a record is a delete marker.
  */
-public class DefaultDeleteMarkerEvaluator implements DeleteMarkerEvaluator {
+public class DefaultDeleteMarkerEvaluator<I> implements DeleteMarkerEvaluator<I> {
 
   private final String deleteFieldName;
   private final Option<HoodieReaderContext> readerContext;
-  
+
   /**
    * Constructor with required parameters.
-   * 
+   *
    * @param deleteFieldName The field name that indicates if a record is a delete marker
-   * @param readerContext The reader context to extract values from engine-specific records
+   * @param readerContext   The reader context to extract values from engine-specific records
    */
   public DefaultDeleteMarkerEvaluator(String deleteFieldName, Option<HoodieReaderContext> readerContext) {
     this.deleteFieldName = deleteFieldName;
     this.readerContext = readerContext;
   }
-  
+
   @Override
   public boolean isDelete(Object record) {
     if (readerContext.isPresent()) {
       Object deleteValue = readerContext.get().getValue(record, null, deleteFieldName);
       return deleteValue != null && Boolean.TRUE.equals(deleteValue);
     }
-    
+
     // Fallback implementation for when no reader context is available
     if (record instanceof java.util.Map) {
       Object deleteValue = ((java.util.Map) record).get(deleteFieldName);
       return deleteValue != null && Boolean.TRUE.equals(deleteValue);
     }
-    
+
     return false;
   }
 }

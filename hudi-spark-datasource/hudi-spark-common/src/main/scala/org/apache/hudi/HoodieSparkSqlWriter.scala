@@ -40,6 +40,7 @@ import org.apache.hudi.common.model.HoodieTableType.{COPY_ON_WRITE, MERGE_ON_REA
 import org.apache.hudi.common.table.{HoodieTableConfig, HoodieTableMetaClient, HoodieTableVersion, TableSchemaResolver}
 import org.apache.hudi.common.table.log.block.HoodieLogBlock.HoodieLogBlockType
 import org.apache.hudi.common.table.timeline.HoodieInstantTimeGenerator
+import org.apache.hudi.io.storage.row.{SparkHoodieExpressionFileGroupIOFactory, SparkHoodieIOContext}
 import org.apache.hudi.common.util.{CommitUtils, Option => HOption, StringUtils}
 import org.apache.hudi.common.util.ConfigUtils.getAllConfigKeys
 import org.apache.hudi.config.{HoodieCompactionConfig, HoodieInternalConfig, HoodieWriteConfig}
@@ -392,10 +393,32 @@ class HoodieSparkSqlWriterInternal {
 
             // Create a HoodieWriteClient & issue the delete.
             val internalSchemaOpt = HoodieSchemaUtils.getLatestTableInternalSchema(hoodieConfig, tableMetaClient)
-            val client = hoodieWriteClient.getOrElse(DataSourceUtils.createHoodieClient(jsc,
-                null, path, tblName,
-                (addSchemaEvolutionParameters(parameters, internalSchemaOpt) - HoodieWriteConfig.AUTO_COMMIT_ENABLE.key).asJava))
-              .asInstanceOf[SparkRDDWriteClient[_]]
+            val finalOpts = (addSchemaEvolutionParameters(parameters, internalSchemaOpt) - HoodieWriteConfig.AUTO_COMMIT_ENABLE.key)
+            val client = hoodieWriteClient.getOrElse {
+                val client = DataSourceUtils.createHoodieClient(jsc, null, path, tblName, finalOpts.asJava)
+                
+                // Check if we need to create and set the FileGroupIOFactory for MERGE INTO
+                val useFileGroupIO = finalOpts.getOrElse("hoodie.filegroup.io.enabled", "false").toBoolean
+                if (useFileGroupIO) {
+                  // Create SparkHoodieExpressionFileGroupIOFactory with the serialized expressions
+                  val updateExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.update", "")
+                  val insertExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.insert", "")
+                  val deleteExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.delete", "")
+                  
+                  val sparkIOContext = new SparkHoodieIOContext(jsc)
+                  val fileGroupIOFactory = new SparkHoodieExpressionFileGroupIOFactory(
+                    sparkIOContext, 
+                    updateExpressions, 
+                    insertExpressions, 
+                    deleteExpressions
+                  )
+
+                  // TODO: Set the above factory on the table. Currently, we don't have HoodieTable instance here.
+                  // client.getHoodieTable.setFileGroupIOFactory(fileGroupIOFactory)
+                }
+                
+                client
+            }.asInstanceOf[SparkRDDWriteClient[_]]
 
             if (isAsyncCompactionEnabled(client, tableConfig, parameters, jsc.hadoopConfiguration())) {
               streamingWritesParamsOpt.map(_.asyncCompactionTriggerFn.get.apply(client))
@@ -431,10 +454,32 @@ class HoodieSparkSqlWriterInternal {
 
             // Issue the delete.
             val schemaStr = new TableSchemaResolver(tableMetaClient).getTableAvroSchema(false).toString
-            val client = hoodieWriteClient.getOrElse(DataSourceUtils.createHoodieClient(jsc,
-                schemaStr, path, tblName,
-                (parameters - HoodieWriteConfig.AUTO_COMMIT_ENABLE.key).asJava))
-              .asInstanceOf[SparkRDDWriteClient[_]]
+            val finalOpts = parameters - HoodieWriteConfig.AUTO_COMMIT_ENABLE.key
+            val client = hoodieWriteClient.getOrElse {
+                val client = DataSourceUtils.createHoodieClient(jsc, schemaStr, path, tblName, finalOpts.asJava)
+                
+                // Check if we need to create and set the FileGroupIOFactory for MERGE INTO
+                val useFileGroupIO = finalOpts.getOrElse("hoodie.filegroup.io.enabled", "false").toBoolean
+                if (useFileGroupIO) {
+                  // Create SparkHoodieExpressionFileGroupIOFactory with the serialized expressions
+                  val updateExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.update", "")
+                  val insertExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.insert", "")
+                  val deleteExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.delete", "")
+                  
+                  val sparkIOContext = new SparkHoodieIOContext(jsc)
+                  val fileGroupIOFactory = new SparkHoodieExpressionFileGroupIOFactory(
+                    sparkIOContext, 
+                    updateExpressions, 
+                    insertExpressions, 
+                    deleteExpressions
+                  )
+
+                  // TODO: Set the above factory on the table. Currently, we don't have HoodieTable instance here.
+                  // client.getHoodieTable.setFileGroupIOFactory(fileGroupIOFactory)
+                }
+                
+                client
+            }.asInstanceOf[SparkRDDWriteClient[_]]
             // Issue delete partitions
             instantTime = client.createNewInstantTime()
             client.startCommitWithTime(instantTime, commitActionType)
@@ -477,7 +522,30 @@ class HoodieSparkSqlWriterInternal {
             val client = hoodieWriteClient.getOrElse {
               val finalOpts = addSchemaEvolutionParameters(parameters, internalSchemaOpt, Some(writerSchema)) - HoodieWriteConfig.AUTO_COMMIT_ENABLE.key
               // TODO(HUDI-4772) proper writer-schema has to be specified here
-              DataSourceUtils.createHoodieClient(jsc, processedDataSchema.toString, path, tblName, finalOpts.asJava)
+              val client = DataSourceUtils.createHoodieClient(jsc, processedDataSchema.toString, path, tblName, finalOpts.asJava)
+              
+              // Check if we need to create and set the FileGroupIOFactory for MERGE INTO
+              // Use constants from MergeIntoHoodieTableCommand
+              val useFileGroupIO = finalOpts.getOrElse("hoodie.filegroup.io.enabled", "false").toBoolean
+              if (useFileGroupIO) {
+                // Create SparkHoodieExpressionFileGroupIOFactory with the serialized expressions
+                val updateExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.update", "")
+                val insertExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.insert", "")
+                val deleteExpressions = finalOpts.getOrElse("hoodie.filegroup.io.expressions.delete", "")
+                
+                val sparkIOContext = new SparkHoodieIOContext(jsc)
+                val fileGroupIOFactory = new SparkHoodieExpressionFileGroupIOFactory(
+                  sparkIOContext, 
+                  updateExpressions, 
+                  insertExpressions, 
+                  deleteExpressions
+                )
+
+                // TODO: Set the above factory on the table. Currently, we don't have HoodieTable instance here.
+                // client.getHoodieTable.setFileGroupIOFactory(fileGroupIOFactory)
+              }
+              
+              client
             }
 
             if (isAsyncCompactionEnabled(client, tableConfig, parameters, jsc.hadoopConfiguration())) {
@@ -775,8 +843,31 @@ class HoodieSparkSqlWriterInternal {
       }
 
       val jsc = new JavaSparkContext(sqlContext.sparkContext)
-      val writeClient = hoodieWriteClient.getOrElse(DataSourceUtils.createHoodieClient(jsc,
-        schema, path, tableName, parameters.asJava))
+      val writeClient = hoodieWriteClient.getOrElse {
+        val client = DataSourceUtils.createHoodieClient(jsc, schema, path, tableName, parameters.asJava)
+        
+        // Check if we need to create and set the FileGroupIOFactory for MERGE INTO
+        val useFileGroupIO = parameters.getOrElse("hoodie.filegroup.io.enabled", "false").toBoolean
+        if (useFileGroupIO) {
+          // Create SparkHoodieExpressionFileGroupIOFactory with the serialized expressions
+          val updateExpressions = parameters.getOrElse("hoodie.filegroup.io.expressions.update", "")
+          val insertExpressions = parameters.getOrElse("hoodie.filegroup.io.expressions.insert", "")
+          val deleteExpressions = parameters.getOrElse("hoodie.filegroup.io.expressions.delete", "")
+          
+          val sparkIOContext = new SparkHoodieIOContext(jsc)
+          val fileGroupIOFactory = new SparkHoodieExpressionFileGroupIOFactory(
+            sparkIOContext, 
+            updateExpressions, 
+            insertExpressions, 
+            deleteExpressions
+          )
+          
+          // TODO: Set the above factory on the table. Currently, we don't have HoodieTable instance here.
+          // client.getHoodieTable.setFileGroupIOFactory(fileGroupIOFactory)
+        }
+        
+        client
+      }
       try {
         writeClient.bootstrap(org.apache.hudi.common.util.Option.empty())
       } finally {

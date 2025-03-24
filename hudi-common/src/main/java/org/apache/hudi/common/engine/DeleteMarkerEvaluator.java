@@ -25,7 +25,7 @@ import java.io.Serializable;
  * Interface for evaluating whether a record represents a delete marker.
  * Used to replace payload-based delete detection with a more direct approach.
  */
-public interface DeleteMarkerEvaluator extends Serializable {
+public interface DeleteMarkerEvaluator<I> extends Serializable {
   
   /**
    * Determines if the provided record should be treated as a delete marker.

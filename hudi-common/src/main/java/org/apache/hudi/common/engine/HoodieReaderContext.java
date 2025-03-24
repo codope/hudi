@@ -67,7 +67,7 @@ public abstract class HoodieReaderContext<T> implements Closeable {
   private Boolean hasBootstrapBaseFile = null;
   private Boolean needsBootstrapMerge = null;
   private Boolean shouldMergeUseRecordPosition = null;
-  
+
   // For ordering and delete marker evaluation
   private OrderingComparator orderingComparator = null;
   private DeleteMarkerEvaluator deleteMarkerEvaluator = null;
@@ -200,12 +200,11 @@ public abstract class HoodieReaderContext<T> implements Closeable {
   public abstract T convertAvroRecord(IndexedRecord avroRecord);
 
   public abstract GenericRecord convertToAvroRecord(T record, Schema schema);
-  
+
   /**
    * @param mergeMode        record merge mode
    * @param mergeStrategyId  record merge strategy ID
    * @param mergeImplClasses custom implementation classes for record merging
-   *
    * @return {@link HoodieRecordMerger} to use.
    */
   public abstract Option<HoodieRecordMerger> getRecordMerger(RecordMergeMode mergeMode, String mergeStrategyId, String mergeImplClasses);
@@ -235,9 +234,9 @@ public abstract class HoodieReaderContext<T> implements Closeable {
   /**
    * Gets the ordering value in particular type.
    *
-   * @param recordOption An option of record.
-   * @param metadataMap  A map containing the record metadata.
-   * @param schema       The Avro schema of the record.
+   * @param recordOption      An option of record.
+   * @param metadataMap       A map containing the record metadata.
+   * @param schema            The Avro schema of the record.
    * @param orderingFieldName name of the ordering field
    * @return The ordering value.
    */
@@ -370,7 +369,6 @@ public abstract class HoodieReaderContext<T> implements Closeable {
    * in Spark for proper value comparison.
    *
    * @param value {@link Comparable} value to be converted.
-   *
    * @return the converted value in a type representation in a specific engine.
    */
   public Comparable convertValueToEngineType(Comparable value) {
@@ -400,7 +398,7 @@ public abstract class HoodieReaderContext<T> implements Closeable {
 
   /**
    * Gets the OrderingComparator to be used for record merging.
-   * 
+   *
    * @return The OrderingComparator instance
    */
   public OrderingComparator getOrderingComparator() {
@@ -409,37 +407,37 @@ public abstract class HoodieReaderContext<T> implements Closeable {
     }
     return orderingComparator;
   }
-  
+
   /**
    * Sets a custom OrderingComparator implementation.
-   * 
+   *
    * @param comparator The OrderingComparator to use
    */
   public void setOrderingComparator(OrderingComparator comparator) {
     this.orderingComparator = comparator;
   }
-  
+
   /**
    * Gets the DeleteMarkerEvaluator to be used for detection of delete records.
-   * 
+   *
    * @return The DeleteMarkerEvaluator instance
    */
   public DeleteMarkerEvaluator getDeleteMarkerEvaluator() {
     return deleteMarkerEvaluator;
   }
-  
+
   /**
    * Sets a custom DeleteMarkerEvaluator implementation.
-   * 
+   *
    * @param evaluator The DeleteMarkerEvaluator to use
    */
   public void setDeleteMarkerEvaluator(DeleteMarkerEvaluator evaluator) {
     this.deleteMarkerEvaluator = evaluator;
   }
-  
+
   /**
    * Determines if a record is a delete marker using the configured DeleteMarkerEvaluator.
-   * 
+   *
    * @param record The record to evaluate
    * @return true if the record is a delete marker, false otherwise
    */
@@ -447,19 +445,19 @@ public abstract class HoodieReaderContext<T> implements Closeable {
     if (deleteMarkerEvaluator != null) {
       return deleteMarkerEvaluator.isDelete(record);
     }
-    
+
     // Check if the metadata contains a delete marker flag
     Map<String, Object> metadata = generateMetadataForRecord(record, null);
     if (metadata.containsKey(INTERNAL_META_DELETE_MARKER)) {
       return (boolean) metadata.get(INTERNAL_META_DELETE_MARKER);
     }
-    
+
     return false;
   }
-  
+
   /**
    * Compare two ordering values using the configured OrderingComparator.
-   * 
+   *
    * @param value1 First ordering value
    * @param value2 Second ordering value
    * @return negative if value1 < value2, 0 if equal, positive if value1 > value2
@@ -467,17 +465,17 @@ public abstract class HoodieReaderContext<T> implements Closeable {
   public int compareOrderingValues(Object value1, Object value2) {
     return getOrderingComparator().compare(value1, value2);
   }
-  
+
   /**
    * Processes a record with a new version, merging them based on ordering values and other criteria.
    * This is used in place of the HoodieRecordPayload-based merging.
-   * 
+   *
    * @param currentRecord The current record from storage
-   * @param newRecord The new record to be potentially merged (can be HoodieRecord or engine-specific type)
+   * @param newRecord     The new record to be potentially merged (can be HoodieRecord or engine-specific type)
    * @return The merged record, or null if the record should be deleted
    */
   public abstract T processRecordWithNewVersion(T currentRecord, Object newRecord);
-  
+
   /**
    * Encodes the given avro schema for efficient serialization.
    */
