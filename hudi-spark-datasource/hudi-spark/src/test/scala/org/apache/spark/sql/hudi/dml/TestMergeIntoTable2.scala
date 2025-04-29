@@ -1369,4 +1369,121 @@ class TestMergeIntoTable2 extends HoodieSparkSqlTestBase {
       }
     )
   }
+
+  test("MERGE INTO with MOR") {
+    spark.sql("create table tb_parquet (id int, comb int, col0 int, col1 bigint, col2 float, col3 double, col4 decimal(10,4), col5 string, col6 date, col7 timestamp, col8 boolean, col9 binary, par date) using parquet;")
+
+    spark.sql("insert into tb_parquet values\n(1,1,11,100001,101.01,1001.0001,100001.0001,'a000001',CAST('2021-12-25' AS DATE),CAST('2021-12-25 12:01:01' AS TIMESTAMP),true,CAST('a01' AS BINARY),CAST('2021-12-25' AS DATE)),\n(2,2,12,100002,102.02,1002.0002,100002.0002,'a000002',CAST('2021-12-25' AS DATE),CAST('2021-12-25 12:02:02' AS TIMESTAMP),true,CAST('a02' AS BINARY),CAST('2021-12-25' AS DATE)),\n(3,3,13,100003,103.03,1003.0003,100003.0003,'a000003',CAST('2021-12-25' AS DATE),CAST('2021-12-25 12:03:03' AS TIMESTAMP),CAST(false as Boolean),CAST('a03' AS BINARY),CAST('2021-12-25' AS DATE)),\n(4,4,14,100004,104.04,1004.0004,100004.0004,'a000004',CAST('2021-12-26' AS DATE),CAST('2021-12-26 12:04:04' AS TIMESTAMP),true,CAST('a04' AS BINARY),CAST('2021-12-26' AS DATE)),\n(5,5,15,100005,105.05,1005.0005,100005.0005,'a000005',CAST('2021-12-26' AS DATE),CAST('2021-12-26 12:05:05' AS TIMESTAMP),false,CAST('a05' AS BINARY),CAST('2021-12-26' AS DATE));")
+
+    spark.sql("SELECT * FROM tb_parquet;").show(false)
+
+    spark.sql("create table tb_parquet2 (id int, comb int, col0 int, col1 bigint, col2 float, col3 double, col4 decimal(10,4), col5 string, col6 date, col7 timestamp, col8 boolean, col9 binary, par date) using hudi partitioned by(par) options(type='mor', primaryKey='id', preCombineField='comb');")
+
+    spark.sql("insert into tb_parquet2 values\n(3,30,130,133333,133.33,1333.3333,133333.3333,'aaaaaa3',CAST('2021-12-25' AS DATE),CAST('2021-12-25 12:33:33' AS TIMESTAMP),true,CAST('a33' AS BINARY),CAST('2021-12-25' AS DATE)),\n(5,50,150,100555,105.55,1055.0055,100555.0055,'a000555',CAST('2021-12-26' AS DATE),CAST('2021-12-26 12:55:05' AS TIMESTAMP),false,CAST('a55' AS BINARY),CAST('2021-12-26' AS DATE)),\n(6,6,16,100006,106.06,1006.0006,100006.0006,'a000006',CAST('2021-12-27' AS DATE),CAST('2021-12-27 12:07:07' AS TIMESTAMP),false,CAST('a07' AS BINARY),CAST('2021-12-27' AS DATE));")
+
+    spark.sql("SELECT * FROM tb_parquet2;").show(false)
+
+    spark.sql("create table hudi_mor_table (id int, comb int, col0 int, col1 bigint, col2 float, col3 double, col4 decimal(10,4), col5 string, col6 date, col7 timestamp, col8 boolean, col9 binary, par date) using hudi partitioned by(par) options(type='mor', primaryKey='id', preCombineField='comb');")
+
+    spark.sql("insert into hudi_mor_table select * from tb_parquet;")
+
+    spark.sql("SELECT * FROM hudi_mor_table;").show(false)
+
+    spark.sql("delete from hudi_mor_table where id = 3;")
+
+    spark.sql(
+      s"""
+         |merge into hudi_mor_table t1 using tb_parquet2 t2 on t1.id = t2.id
+         |when matched then update set id=t2.id, comb=t2.comb, col0=t2.col0+1, col1=t2.col1, col2=t2.col2, col3=t2.col3, col4=t2.col4, col5='aaaa', col6=t2.col6, col7=t2.col7, col8=t2.col8, col9=t2.col9, par=t2.par
+         |when not matched then insert (id, comb, col0, col1, col2, col3, col4, col5, col6, col7, col8, col9, par) values(t2.id, t2.comb, t2.col0, t2.col1, t2.col2, t2.col3, t2.col4, t2.col5, t2.col6, t2.col7, t2.col8, t2.col9, t2.par)
+         |""".stripMargin)
+
+    spark.sql("select * from hudi_mor_table").show(false)
+  }
+
+  test("Test MergeInto for MOR table 3") {
+    withTempDir { tmp =>
+      val tableName = generateTableName
+      // Create a mor partitioned table.
+      spark.sql(
+        s"""
+           | create table $tableName (
+           |  id int,
+           |  name string,
+           |  price double,
+           |  ts int,
+           |  dt string
+           | ) using hudi
+           | tblproperties (
+           |  type = 'mor',
+           |  primaryKey = 'id',
+           |  preCombineField = 'ts'
+           | )
+           | partitioned by(dt)
+           | location '${tmp.getCanonicalPath}'
+         """.stripMargin)
+
+      // Insert 2 records
+      spark.sql(
+        s"""
+           | insert into $tableName values
+           |  (1, 'a1', 10.1, 1000, '2021-03-21'),
+           |  (2, 'a2', 10.2, 1002, '2021-03-21')
+         """.stripMargin)
+
+      // create another table
+      val tableName2 = generateTableName
+      spark.sql(
+        s"""
+           | create table $tableName2 (
+           |  id int,
+           |  name string,
+           |  price double,
+           |  ts int,
+           |  dt string
+           | ) using hudi
+           | tblproperties (
+           |  type = 'mor',
+           |  primaryKey = 'id',
+           |  preCombineField = 'ts'
+           | )
+           | partitioned by(dt)
+           | location '${tmp.getCanonicalPath}'
+         """.stripMargin)
+
+      // insert 2 records with 1 record having same key as in previous table while another record with different key
+      spark.sql(
+        s"""
+           | insert into $tableName2 values
+           |  (1, 'a1_new', 10.1, 1003, '2021-03-21'),
+           |  (3, 'a3', 10.3, 1003, '2021-03-21')
+         """.stripMargin)
+
+      // delete the record with same key
+      spark.sql(
+        s"""
+           | delete from $tableName where id = 1
+         """.stripMargin)
+      // merge the two tables when matched then update some field else insert
+      spark.sql(
+        s"""
+           | merge into $tableName as t0
+           | using (
+           |  select id, name, price, ts, dt from $tableName2
+           | ) as s0
+           | on t0.id = s0.id
+           | when matched then update set t0.name = s0.name,
+           |      t0.price = s0.price,
+           |      t0.ts = s0.ts,
+           |      t0.dt = s0.dt
+           | when not matched then insert *
+         """.stripMargin)
+      // check the records in the table
+      checkAnswer(s"select id, name, price, ts, dt from $tableName")(
+        Seq(1, "a1_new", 10.1, 1003, "2021-03-21"),
+        Seq(2, "a2", 10.2, 1002, "2021-03-21"),
+        Seq(3, "a3", 10.3, 1003, "2021-03-21")
+      )
+    }
+  }
 }
