@@ -111,7 +111,6 @@ import static org.apache.hudi.common.util.DateTimeUtils.instantToMicros;
 import static org.apache.hudi.common.util.DateTimeUtils.microsToInstant;
 import static org.apache.hudi.common.util.StringUtils.getUTF8Bytes;
 import static org.apache.hudi.common.util.ValidationUtils.checkState;
-import static org.apache.hudi.metadata.HoodieTableMetadataUtil.tryUpcastDecimal;
 
 /**
  * Helper class to do common stuff across Avro.
@@ -1470,10 +1469,14 @@ public class HoodieAvroUtils {
           .setValue((int) localDate.toEpochDay())
           .build();
     } else if (value instanceof BigDecimal) {
-      Schema valueSchema = DecimalWrapper.SCHEMA$.getField("value").schema();
-      BigDecimal upcastDecimal = tryUpcastDecimal((BigDecimal) value, (LogicalTypes.Decimal) valueSchema.getLogicalType());
-      return DecimalWrapper.newBuilder(DECIMAL_WRAPPER_BUILDER_STUB.get())
-          .setValue(AVRO_DECIMAL_CONVERSION.toBytes(upcastDecimal, valueSchema, valueSchema.getLogicalType()))
+      // Preserve original decimal by using string representation to avoid scale loss.
+      // This approach maintains both precision and scale information.
+      BigDecimal originalDecimal = (BigDecimal) value;
+      
+      // Store as string to preserve exact decimal representation
+      // This avoids the scale conversion issue in DecimalWrapper
+      return StringWrapper.newBuilder(STRING_WRAPPER_BUILDER_STUB.get())
+          .setValue(originalDecimal.toPlainString())
           .build();
     } else if (value instanceof Timestamp) {
       // NOTE: Due to breaking changes in code-gen b/w Avro 1.8.2 and 1.10, we can't
@@ -1540,7 +1543,16 @@ public class HoodieAvroUtils {
     } else if (avroValueWrapper instanceof BytesWrapper) {
       return ((BytesWrapper) avroValueWrapper).getValue();
     } else if (avroValueWrapper instanceof StringWrapper) {
-      return ((StringWrapper) avroValueWrapper).getValue();
+      String stringValue = ((StringWrapper) avroValueWrapper).getValue();
+      // Check if this string represents a decimal value (for decimal column stats)
+      // This is part of the fix for decimal scaling issues
+      try {
+        // Try to parse as BigDecimal first
+        return new BigDecimal(stringValue);
+      } catch (NumberFormatException e) {
+        // If not a decimal, return as string
+        return stringValue;
+      }
     } else if (avroValueWrapper instanceof GenericRecord) {
       // NOTE: This branch could be hit b/c Avro records could be reconstructed
       //       as {@code GenericRecord)

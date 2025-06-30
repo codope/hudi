@@ -21,7 +21,6 @@ package org.apache.hudi.avro;
 import org.apache.hudi.avro.model.BooleanWrapper;
 import org.apache.hudi.avro.model.BytesWrapper;
 import org.apache.hudi.avro.model.DateWrapper;
-import org.apache.hudi.avro.model.DecimalWrapper;
 import org.apache.hudi.avro.model.DoubleWrapper;
 import org.apache.hudi.avro.model.FloatWrapper;
 import org.apache.hudi.avro.model.IntWrapper;
@@ -709,7 +708,7 @@ public class TestHoodieAvroUtils {
             {new Timestamp(1690766971000L), TimestampMicrosWrapper.class},
             {new Date(1672560000000L), DateWrapper.class},
             {LocalDate.of(2023, 1, 1), LocalDateWrapper.class},
-            {new BigDecimal("12345678901234.2948"), DecimalWrapper.class}
+            {new BigDecimal("12345678901234.2948"), StringWrapper.class}
         };
     return Stream.of(data).map(Arguments::of);
   }
@@ -734,9 +733,9 @@ public class TestHoodieAvroUtils {
           ((GenericRecord) wrapperValue).get(0));
       assertEquals(value, unwrapAvroValueWrapper(wrapperValue));
     } else {
-      assertEquals("0.000000000000000",
-          ((BigDecimal) value)
-              .subtract((BigDecimal) unwrapAvroValueWrapper(wrapperValue)).toPlainString());
+      // For BigDecimal values, they are now stored as strings to preserve exact scale
+      // The unwrapped value should be exactly equal to the original
+      assertEquals(value, unwrapAvroValueWrapper(wrapperValue));
     }
   }
 

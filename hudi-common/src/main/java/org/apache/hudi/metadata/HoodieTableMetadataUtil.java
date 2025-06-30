@@ -1782,6 +1782,11 @@ public class HoodieTableMetadataUtil {
       case FIXED:
       case BYTES:
         if (schema.getLogicalType() instanceof LogicalTypes.Decimal) {
+          // For decimal logical types, ensure proper conversion without scale loss
+          if (val instanceof BigDecimal) {
+            // Return the BigDecimal as-is to preserve original scale
+            return (BigDecimal) val;
+          }
           return (Comparable<?>) val;
         }
         return (ByteBuffer) val;

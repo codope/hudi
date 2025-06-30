@@ -499,7 +499,12 @@ object ColumnStatsIndexSupport {
             // Scala BigDecimal: convert to java.math.BigDecimal and enforce the scale
             bd.bigDecimal.setScale(dt.scale, java.math.RoundingMode.UNNECESSARY)
           case bd: java.math.BigDecimal =>
-            bd.setScale(dt.scale, java.math.RoundingMode.UNNECESSARY)
+            // For decimals stored as strings (to preserve original scale),
+            // we don't need to adjust scale as it's already correct
+            bd
+          case str: String =>
+            // Handle decimals stored as strings (part of the decimal scaling fix)
+            new java.math.BigDecimal(str)
           case other =>
             throw new UnsupportedOperationException(s"Cannot deserialize value for DecimalType: unexpected type ${other.getClass.getName}")
         }
