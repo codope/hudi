@@ -25,6 +25,7 @@ import org.apache.hudi.common.engine.HoodieEngineContext;
 import org.apache.hudi.common.engine.HoodieLocalEngineContext;
 import org.apache.hudi.common.model.FileSlice;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
+import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.StringUtils;
 import org.apache.hudi.common.util.collection.Pair;
@@ -252,7 +253,29 @@ public abstract class PartitionAwareClusteringPlanStrategy<T,I,K,O> extends Clus
         .setVersion(getPlanVersion())
         .setPreserveHoodieMetadata(true)
         .setMissingSchedulePartitions(missingPartitions)
+        .setInputHorizonCompletionTime(getInputHorizonCompletionTime())
         .build());
+  }
+
+  /**
+   * RFC-108 / HUDI-1045: the completion-time horizon of the input snapshot this plan is built from.
+   * The eligible file slices are read from the file system view backed by the completed timeline, so
+   * the horizon is the completion time of the latest completed instant at planning time. Any write
+   * whose completion time is greater than this horizon is a "residual" that clustering did not include
+   * and must be reconciled to the output file groups. Returns null when it cannot be determined (e.g.
+   * empty timeline or legacy instants without a completion time), in which case consumers fall back to
+   * comparing against the clustering/replace instant time.
+   *
+   * <p>NOTE (prototype): this is a best-effort horizon for the Phase 0a guard. The exact horizon
+   * semantics (and closing the HUDI-8464 request-time-vs-data gap) are finalized in Phase 2.
+   */
+  private String getInputHorizonCompletionTime() {
+    Option<HoodieInstant> lastCompleted = getHoodieTable().getActiveTimeline().filterCompletedInstants().lastInstant();
+    if (!lastCompleted.isPresent()) {
+      return null;
+    }
+    String completionTime = lastCompleted.get().getCompletionTime();
+    return StringUtils.isNullOrEmpty(completionTime) ? lastCompleted.get().requestedTime() : completionTime;
   }
 
   public List<String> getRegexPatternMatchedPartitions(HoodieWriteConfig config, List<String> partitionPaths) {

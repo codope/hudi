@@ -173,6 +173,7 @@ public class TestConcurrentSchemaEvolutionTableSchemaGetter extends HoodieCommon
           Collections.emptyMap(),
           1,
           false,
+          null,
           null);
       HoodieRequestedReplaceMetadata requestedMetadata = new HoodieRequestedReplaceMetadata(
           WriteOperationType.UNKNOWN.name(),
@@ -320,7 +321,7 @@ public class TestConcurrentSchemaEvolutionTableSchemaGetter extends HoodieCommon
     // Clustering commit
     HoodieClusteringGroup group = new HoodieClusteringGroup();
     HoodieClusteringPlan plan = new HoodieClusteringPlan(Collections.singletonList(group),
-        HoodieClusteringStrategy.newBuilder().build(), Collections.emptyMap(), 1, false, null);
+        HoodieClusteringStrategy.newBuilder().build(), Collections.emptyMap(), 1, false, null, null);
     HoodieRequestedReplaceMetadata requestedMetadata = new HoodieRequestedReplaceMetadata(WriteOperationType.CLUSTER.name(), plan, Collections.emptyMap(), 1);
     String replaceInstantTime = padWithLeadingZeros(Integer.toString(startCommitTime), REQUEST_TIME_LENGTH);
     testTable.addReplaceCommit(replaceInstantTime, Option.of(incTimestampStrByOne(replaceInstantTime)), Option.of(requestedMetadata), Option.empty(),

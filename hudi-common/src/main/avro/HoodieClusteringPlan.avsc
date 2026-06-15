@@ -58,6 +58,12 @@
          "items":"string"
        }],
        "default": null
+     },
+     {
+       "_comment":"RFC-108 / HUDI-1045: completion-time horizon of the input snapshot this plan was built from. A write whose completion time is greater than this horizon is a 'residual' that clustering did not include and that must be reconciled to the output file groups (see Phase 0a guard / Design A/B).",
+       "name":"inputHorizonCompletionTime",
+       "type":["null", "string"],
+       "default": null
      }
   ]
 }

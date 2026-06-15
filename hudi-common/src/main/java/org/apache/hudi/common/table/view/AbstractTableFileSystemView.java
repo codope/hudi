@@ -46,6 +46,7 @@ import org.apache.hudi.common.util.ValidationUtils;
 import org.apache.hudi.common.util.collection.Pair;
 import org.apache.hudi.exception.HoodieException;
 import org.apache.hudi.exception.HoodieIOException;
+import org.apache.hudi.exception.HoodieReplacedFileGroupLostWriteException;
 import org.apache.hudi.metadata.HoodieTableMetadata;
 import org.apache.hudi.storage.StoragePath;
 import org.apache.hudi.storage.StoragePathInfo;
@@ -65,6 +66,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
@@ -111,6 +113,16 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
 
   // Sampling logger for replaced file groups read logs (log at INFO once every 5 times)
   private final SamplingLogger replacedFileGroupsReadSamplingLogger = new SamplingLogger(log, 5);
+
+  // RFC-108 / HUDI-1045 (Phase 0a): guard for writes silently dropped because they landed in a file
+  // group AFTER it was replaced by a clustering/replace commit. Hard replacement is preserved; the
+  // guard only flags the condition (counter + WARN, or throw in strict mode) so the data-loss race
+  // becomes observable/testable instead of silent. See flagLostWritesInReplacedFileGroups().
+  private final AtomicLong numReplacedFileGroupLostWriteDetections = new AtomicLong(0);
+  // When true, a detected lost write throws HoodieReplacedFileGroupLostWriteException instead of only
+  // warning. Defaults to false (non-breaking). Prototype: settable directly; productionize via
+  // FileSystemViewStorageConfig.
+  private volatile boolean strictReplacedFileGroupLostWriteCheck = false;
 
   // Locks to control concurrency. Sync operations use write-lock blocking all fetch operations.
   // For the common-case, we allow concurrent read of single or multiple partitions
@@ -207,6 +219,11 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
                         s.getFileId()), s.getBootstrapFileStatus())));
               }
             }
+            // RFC-108 / HUDI-1045 (Phase 0a): flag any write silently dropped by hard replacement.
+            // Run before storePartitionView so that, in strict mode, the throw happens without caching
+            // a partial view; otherwise the partition would already be stored and a subsequent access
+            // would skip the guard (isPartitionAvailableInStore == true) and silently succeed.
+            flagLostWritesInReplacedFileGroups(value);
             storePartitionView(partition, value);
           }
         });
@@ -308,6 +325,79 @@ public abstract class AbstractTableFileSystemView implements SyncableFileSystemV
     replacedFileGroupsReadSamplingLogger.logInfoOrDebug(
         "Took {} ms to read {} instants, {} replaced file groups",
         () -> new Object[]{hoodieTimer.endTimer(), replacedTimeline.countInstants(), replacedFileGroups.size()});
+  }
+
+  /**
+   * RFC-108 / HUDI-1045 (Phase 0a) guard. For each just-built file group that has been replaced by a
+   * clustering/replace commit, detect whether it still has a live file slice written <em>after</em>
+   * the replace instant. Replacement is tracked per file group (a blanket boolean), so such a slice
+   * is silently excluded from query results today -- i.e. a concurrent write was lost. We keep hard
+   * replacement intact and only flag the condition: bump a counter, log a WARN, and -- when strict
+   * mode is enabled -- throw {@link HoodieReplacedFileGroupLostWriteException} so the data-loss race
+   * fails loudly in tests/CI instead of corrupting query results.
+   *
+   * <p>The reference point is the replace instant's requested time, which conservatively catches
+   * writes that committed after clustering completed. Tightening the window to the plan's
+   * {@code inputHorizonCompletionTime} (h_C) -- to also catch residuals in the (h_C, t_C) gap -- is a
+   * follow-up once the horizon is read from the clustering plan/commit metadata.
+   */
+  private void flagLostWritesInReplacedFileGroups(List<HoodieFileGroup> fileGroups) {
+    for (HoodieFileGroup fileGroup : fileGroups) {
+      Option<HoodieInstant> replaceInstant = getReplaceInstant(fileGroup.getFileGroupId());
+      if (!replaceInstant.isPresent()) {
+        continue;
+      }
+      String replaceTime = replaceInstant.get().requestedTime();
+      // A committed slice newer than the replace instant means a write landed in an already-replaced
+      // file group and is being silently hidden by hard replacement. Uncommitted/inflight files are
+      // ignored (they are not lost writes).
+      boolean hasLostWrite = fileGroup.getAllFileSlices()
+          .anyMatch(slice -> hasCommittedWriteAfter(slice, replaceTime));
+      if (!hasLostWrite) {
+        continue;
+      }
+      numReplacedFileGroupLostWriteDetections.incrementAndGet();
+      String msg = String.format(
+          "Detected potential lost write: file group %s was replaced by instant %s but still has a "
+              + "live file slice newer than %s; such slices are excluded from queries (RFC-108/HUDI-1045).",
+          fileGroup.getFileGroupId(), replaceInstant.get(), replaceTime);
+      if (strictReplacedFileGroupLostWriteCheck) {
+        throw new HoodieReplacedFileGroupLostWriteException(msg);
+      }
+      LOG.warn(msg);
+    }
+  }
+
+  /**
+   * Returns true if the file slice has a <em>committed</em> base file or log file whose instant is
+   * strictly greater than {@code referenceInstant}. Uncommitted/inflight files are excluded so that a
+   * failed or in-flight write is not mistaken for a lost write.
+   */
+  private boolean hasCommittedWriteAfter(FileSlice slice, String referenceInstant) {
+    if (slice.getBaseFile().isPresent()
+        && compareTimestamps(slice.getBaseInstantTime(), GREATER_THAN, referenceInstant)
+        && completionTimeQueryView.isCompleted(slice.getBaseInstantTime())) {
+      return true;
+    }
+    return slice.getLogFiles().anyMatch(logFile ->
+        compareTimestamps(logFile.getDeltaCommitTime(), GREATER_THAN, referenceInstant)
+            && completionTimeQueryView.isCompleted(logFile.getDeltaCommitTime()));
+  }
+
+  /**
+   * RFC-108 / HUDI-1045 (Phase 0a): count of lost-write detections since this view was created.
+   * Exposed for observability and tests.
+   */
+  public long getNumReplacedFileGroupLostWriteDetections() {
+    return numReplacedFileGroupLostWriteDetections.get();
+  }
+
+  /**
+   * RFC-108 / HUDI-1045 (Phase 0a): when enabled, a detected lost write throws
+   * {@link HoodieReplacedFileGroupLostWriteException} instead of only warning. Default false.
+   */
+  public void setStrictReplacedFileGroupLostWriteCheck(boolean strict) {
+    this.strictReplacedFileGroupLostWriteCheck = strict;
   }
 
   @Override

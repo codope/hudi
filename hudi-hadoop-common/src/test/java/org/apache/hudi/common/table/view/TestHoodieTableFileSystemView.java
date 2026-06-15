@@ -60,6 +60,7 @@ import org.apache.hudi.common.util.CompactionUtils;
 import org.apache.hudi.common.util.Option;
 import org.apache.hudi.common.util.collection.ImmutablePair;
 import org.apache.hudi.common.util.collection.Pair;
+import org.apache.hudi.exception.HoodieReplacedFileGroupLostWriteException;
 import org.apache.hudi.hadoop.fs.HadoopFSUtils;
 import org.apache.hudi.storage.HoodieStorage;
 import org.apache.hudi.storage.StoragePath;
@@ -2090,6 +2091,82 @@ public class TestHoodieTableFileSystemView extends HoodieCommonTestHarness {
     Set<String> allReplacedFileIds = allReplaced.stream().map(fg -> fg.getFileGroupId().getFileId()).collect(Collectors.toSet());
     Set<String> actualReplacedFileIds = Stream.of(fileId1, fileId3, fileId4).collect(Collectors.toSet());
     assertEquals(actualReplacedFileIds, allReplacedFileIds);
+  }
+
+  /**
+   * RFC-108 / HUDI-1045 (Phase 0a) regression test. A write that lands in a file group AFTER it has
+   * been replaced by a clustering/replace commit is silently excluded from the view today, because
+   * replacement is tracked per file group (a blanket boolean). This reproduces that data-loss race and
+   * asserts the Phase 0a guard flags it (and throws in strict mode), while keeping hard replacement.
+   */
+  @Test
+  public void testReplacedFileGroupWithLaterWriteIsFlaggedAsLostWrite() throws IOException {
+    String partitionPath = "2020/06/27";
+    new File(basePath + "/" + partitionPath).mkdirs();
+
+    String fileId1 = UUID.randomUUID().toString(); // replaced @2, then a committed lost write @3
+    String fileId2 = UUID.randomUUID().toString(); // replaced @2, no later write (negative control)
+    String fileId3 = UUID.randomUUID().toString(); // never replaced (negative control)
+    String fileId4 = UUID.randomUUID().toString(); // replaced @2, later write @4 is UNCOMMITTED (negative control)
+
+    HoodieActiveTimeline commitTimeline = metaClient.getActiveTimeline();
+
+    // commit "1": base files for all four file groups.
+    String commit1 = "1";
+    new File(basePath + "/" + partitionPath + "/" + FSUtils.makeBaseFileName(commit1, TEST_WRITE_TOKEN, fileId1, BASE_FILE_EXTENSION)).createNewFile();
+    new File(basePath + "/" + partitionPath + "/" + FSUtils.makeBaseFileName(commit1, TEST_WRITE_TOKEN, fileId2, BASE_FILE_EXTENSION)).createNewFile();
+    new File(basePath + "/" + partitionPath + "/" + FSUtils.makeBaseFileName(commit1, TEST_WRITE_TOKEN, fileId3, BASE_FILE_EXTENSION)).createNewFile();
+    new File(basePath + "/" + partitionPath + "/" + FSUtils.makeBaseFileName(commit1, TEST_WRITE_TOKEN, fileId4, BASE_FILE_EXTENSION)).createNewFile();
+    saveAsComplete(commitTimeline,
+        INSTANT_GENERATOR.createNewInstant(State.INFLIGHT, HoodieTimeline.COMMIT_ACTION, commit1), new HoodieCommitMetadata());
+
+    // replacecommit "2": clustering replaces fileId1, fileId2 and fileId4.
+    String replaceTime = "2";
+    Map<String, List<String>> partitionToReplaceFileIds = new HashMap<>();
+    List<String> replacedFileIds = new ArrayList<>();
+    replacedFileIds.add(fileId1);
+    replacedFileIds.add(fileId2);
+    replacedFileIds.add(fileId4);
+    partitionToReplaceFileIds.put(partitionPath, replacedFileIds);
+    HoodieCommitMetadata replaceMetadata = CommitUtils.buildMetadata(
+        Collections.emptyList(), partitionToReplaceFileIds, Option.empty(), WriteOperationType.CLUSTER, "", HoodieTimeline.REPLACE_COMMIT_ACTION);
+    saveAsComplete(commitTimeline,
+        INSTANT_GENERATOR.createNewInstant(State.INFLIGHT, HoodieTimeline.REPLACE_COMMIT_ACTION, replaceTime), replaceMetadata);
+
+    // commit "3": a concurrent write lands in the already-replaced fileId1 (t_W=3 > t_C=2) -> lost.
+    String commit3 = "3";
+    new File(basePath + "/" + partitionPath + "/" + FSUtils.makeBaseFileName(commit3, TEST_WRITE_TOKEN, fileId1, BASE_FILE_EXTENSION)).createNewFile();
+    saveAsComplete(commitTimeline,
+        INSTANT_GENERATOR.createNewInstant(State.INFLIGHT, HoodieTimeline.COMMIT_ACTION, commit3), new HoodieCommitMetadata());
+
+    // "4": an UNCOMMITTED write lands in the already-replaced fileId4 -- base file on disk but instant
+    // "4" is never completed. The guard's completionTimeQueryView.isCompleted() check must NOT flag this
+    // (a failed/inflight write is not a lost write), so the detection count must stay at exactly 1.
+    String inflight4 = "4";
+    new File(basePath + "/" + partitionPath + "/" + FSUtils.makeBaseFileName(inflight4, TEST_WRITE_TOKEN, fileId4, BASE_FILE_EXTENSION)).createNewFile();
+
+    // --- default (non-strict) mode: the write is silently dropped, but the guard flags it. ---
+    refreshFsView();
+    AbstractTableFileSystemView view = (AbstractTableFileSystemView) fsView;
+    Set<String> latestBaseFileIds = roView.getLatestBaseFiles(partitionPath)
+        .map(HoodieBaseFile::getFileId).collect(Collectors.toSet());
+    // fileId1 is excluded despite the commit-"3" write -> the silent drop this RFC fixes.
+    assertFalse(latestBaseFileIds.contains(fileId1), "Replaced fileId1's later write is silently dropped today");
+    assertFalse(latestBaseFileIds.contains(fileId2), "Replaced fileId2 is excluded as expected");
+    assertTrue(latestBaseFileIds.contains(fileId3), "Non-replaced fileId3 remains visible");
+    // Exactly one detection: fileId1 (committed slice newer than the replace instant). fileId2
+    // (replaced, no later write), fileId3 (not replaced), and fileId4 (replaced, but its later write
+    // is uncommitted) must NOT be flagged.
+    assertEquals(1, view.getNumReplacedFileGroupLostWriteDetections(),
+        "Guard should flag exactly the replaced file group that received a later committed write");
+
+    // --- strict mode: the same load fails loud instead of dropping data silently. ---
+    refreshFsView();
+    AbstractTableFileSystemView strictView = (AbstractTableFileSystemView) fsView;
+    strictView.setStrictReplacedFileGroupLostWriteCheck(true);
+    Assertions.assertThrows(HoodieReplacedFileGroupLostWriteException.class,
+        () -> roView.getLatestBaseFiles(partitionPath).collect(Collectors.toList()),
+        "Strict mode should throw on a lost write in a replaced file group");
   }
 
   @Test

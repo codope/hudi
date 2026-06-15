@@ -130,7 +130,7 @@ public class TestClusteringUtil {
   private String generateClusteringPlan() {
     HoodieClusteringGroup group = new HoodieClusteringGroup();
     HoodieClusteringPlan plan = new HoodieClusteringPlan(Collections.singletonList(group),
-        HoodieClusteringStrategy.newBuilder().build(), Collections.emptyMap(), 1, false, null);
+        HoodieClusteringStrategy.newBuilder().build(), Collections.emptyMap(), 1, false, null, null);
     HoodieRequestedReplaceMetadata metadata = new HoodieRequestedReplaceMetadata(WriteOperationType.CLUSTER.name(),
         plan, Collections.emptyMap(), 1);
     String instantTime = WriteClientTestUtils.createNewInstantTime();
