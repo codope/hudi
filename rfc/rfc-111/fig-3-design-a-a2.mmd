@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant W as Writer W
+  participant C as Clustering C
+  participant IDX as C.outputIndex
+  Note over W,C: A2 - W commits first, then C
+  W->>W: update k -> v1 (comp > h_C)
+  W->>C: commit to f1 (residual w.r.t. h_C)
+  C->>C: finalize detects residuals in input fgs
+  C->>IDX: owner = outputIndex(k) route by key, not partitioner
+  C->>C: fold k -> v1 into owner fg
+  C->>C: replacecommit (folds + replacement, atomic)
+  Note over W,C: reader sees pre-C or post-C, never a gap

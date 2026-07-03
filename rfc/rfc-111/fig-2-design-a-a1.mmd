@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant W as Writer W
+  participant TL as Timeline
+  participant IDX as Index
+  participant F4 as Owner fg f4
+  Note over TL: A1 - C commits first, then W
+  TL->>TL: replacecommit f1..f3 -> f4,f5 completes (h_C)
+  W->>W: update k -> v1 (tagged to f1)
+  W->>TL: commit detects f1 replaced
+  W->>IDX: lookup(k) -> f4
+  W->>F4: append k -> v1 as log (MOR) / merge into base (COW)
+  W->>TL: commit referencing f4
+  Note over W,F4: read@s: base k -> v0 + log k -> v1 = v1

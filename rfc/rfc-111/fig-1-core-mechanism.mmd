@@ -1,0 +1,15 @@
+flowchart LR
+  subgraph before["Input file groups (pre-clustering)"]
+    f1["f1: k -> v0 (ct10)"]
+    f2["f2"]
+    f3["f3"]
+  end
+  subgraph after["Output file groups (fresh UUIDs)"]
+    f4["f4: k -> v0 (ct preserved)"]
+    f5["f5"]
+  end
+  f1 -->|"C relocates winner"| f4
+  f2 --> f4
+  f3 --> f5
+  W["Concurrent write W: k -> v1"] -.->|"old routing (broken)"| f1
+  W ==>|"index(k)=f4 reroutes"| f4
