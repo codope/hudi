@@ -1,0 +1,10 @@
+sequenceDiagram
+  participant W as Writer W
+  participant C as Clustering C
+  participant R as Reader
+  participant K as Compaction
+  C->>C: replacecommit + clustering map {f1..f3 -> f4,f5, h_C}, SOFT replace
+  W->>C: residual k -> v1 stays live in f1 (no fold at commit)
+  R->>R: read f4 = base(f4) + residual logs(f1..f3), deduped by index
+  K->>K: compaction folds residuals into f4/f5 base
+  Note over K: after fold, residual logs dead -> cleaner (refcount) removes f1..f3

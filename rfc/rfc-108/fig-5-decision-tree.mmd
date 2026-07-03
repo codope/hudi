@@ -1,0 +1,8 @@
+flowchart TD
+  start["Concurrent W during clustering C"] --> nbcc{"NBCC? (MOR + simple bucket)"}
+  nbcc -->|yes| B["Design B (deferred soft replacement). A cannot run: no commit-time conflict hook"]
+  nbcc -->|no / OCC| longrun{"Long clustering under continuous ingestion?"}
+  longrun -->|"yes: A2 fold does not converge"| B
+  longrun -->|"no: short / low-overlap"| idx{"Point/global index? (RLI/MDT/HBase/bucket)"}
+  idx -->|yes| A["Design A (eager remap at commit)"]
+  idx -->|"no: bloom/simple"| A2tag["Design A with re-tag cost, or fall back to B"]
