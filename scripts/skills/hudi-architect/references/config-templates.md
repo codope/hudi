@@ -8,7 +8,7 @@ Grouped `hoodie.*` properties emitted per decision. Consult when generating the 
 2. **Writer properties** — writer-side runtime config.
 3. **Reader properties** — reader-side config (per query engine — different keys per engine).
 4. **Platform-managed properties** — MDT, target Hudi version, other fixed platform standards.
-5. **Workload-dependent tuning variables** — cadences, shuffle parallelism, target sizes.
+5. **Workload-dependent tuning variables** — cadences, target sizes. Not shuffle parallelism: Hudi derives that from the incoming DataFrame's partition count, so setting it explicitly overrides a value that is usually already correct.
 
 ## Durable table properties
 
@@ -67,21 +67,24 @@ hoodie.datasource.write.hive_style_partitioning=true
 ```
 
 ### Meta fields
+
+Boolean — all meta fields or none. **There is no selective / commit-time-only mode at 1.2.0.**
+
 For keep all (default):
 ```
 hoodie.populate.meta.fields=true
 ```
 
-For selective (Hudi 1.x, `_hoodie_commit_time` only):
-```
-hoodie.populate.meta.fields=true
-# Additional config to nullify other meta fields — 1.x-specific, verify exact key at 1.2.0
-```
-
-For disable entirely:
+For disable entirely — append-only batch data with no incremental or CDC consumers, ever:
 ```
 hoodie.populate.meta.fields=false
 ```
+
+Disabling makes incremental queries **non-functional** (not merely slower) and CDC unavailable. Durable: changing it later requires a table rewrite.
+
+**If the workload has any incremental or streaming consumer, emit `true` and don't present a choice** — at 1.2.0 there is no way to keep incremental queries while dropping meta fields.
+
+Selective population via `hoodie.meta.fields.mode` (apache/hudi#19205) targets 1.3.0 and is not merged. When it ships it will be CoW-only, Spark-only, and immutable at table creation.
 
 ## Writer properties
 
@@ -154,11 +157,106 @@ Emit reader config per query engine named in the workload.
 Always emit, don't ask:
 ```
 hoodie.metadata.enable=true                              # MDT on
-hoodie.metadata.index.column.stats.enable=false          # col stats + partition stats off (coupled)
-hoodie.metadata.index.bloom.filter.enable=false          # experimental in 1.2.0
 ```
 
+**Do NOT emit these — they already carry the desired default, so setting them is noise:**
+- `hoodie.metadata.index.column.stats.enable=false` — col stats (and partition stats, which is coupled to the same knob) are off by default. The design guidance that col stats is Operations Agent territory still stands; it just doesn't need a config line.
+- `hoodie.metadata.index.bloom.filter.enable=false` — already false by default. Bloom-via-MDT remains experimental at 1.2.0 and should not be recommended at design time.
+
+General rule: emit config that *changes* behavior. A bundle full of redundant defaults obscures the handful of properties that actually encode the design.
+
 Target Hudi 1.2.0 (implied by dependency version, not a runtime config).
+
+## Source properties (HoodieStreamer)
+
+Derived from source + record format (question-flow.md Q1.2b).
+
+### Kafka + Avro + schema registry
+```
+hoodie.streamer.source.class=org.apache.hudi.utilities.sources.AvroKafkaSource
+hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.SchemaRegistryProvider
+hoodie.streamer.schemaprovider.registry.url=<SCHEMA_REGISTRY_URL>/subjects/<TOPIC>-value/versions/latest
+hoodie.streamer.source.kafka.topic=<TOPIC>
+bootstrap.servers=<KAFKA_BOOTSTRAP>
+auto.offset.reset=latest
+```
+
+### Kafka + Avro + schema file
+```
+hoodie.streamer.source.class=org.apache.hudi.utilities.sources.AvroKafkaSource
+hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.FilebasedSchemaProvider
+hoodie.streamer.schemaprovider.source.schema.file=<PATH>/source.avsc
+hoodie.streamer.schemaprovider.target.schema.file=<PATH>/target.avsc
+hoodie.streamer.source.kafka.topic=<TOPIC>
+bootstrap.servers=<KAFKA_BOOTSTRAP>
+auto.offset.reset=latest
+```
+
+### Kafka + JSON
+```
+hoodie.streamer.source.class=org.apache.hudi.utilities.sources.JsonKafkaSource
+hoodie.streamer.source.kafka.topic=<TOPIC>
+bootstrap.servers=<KAFKA_BOOTSTRAP>
+auto.offset.reset=latest
+```
+Schema provider optional — supply `FilebasedSchemaProvider` or `SchemaRegistryProvider` if the schema is managed rather than inferred.
+
+### Kafka + Protobuf
+```
+hoodie.streamer.source.class=org.apache.hudi.utilities.sources.ProtoKafkaSource
+hoodie.streamer.source.kafka.topic=<TOPIC>
+hoodie.streamer.source.kafka.proto.value.deserializer.class=<PROTO_CLASS>
+bootstrap.servers=<KAFKA_BOOTSTRAP>
+auto.offset.reset=latest
+```
+
+### Schema providers
+
+Schema providers are **optional and orthogonal to source type** — any of them can pair with any HoodieStreamer source. Many sources infer their schema, and simple pipelines that don't expect schema evolution often set no provider at all. That's a legitimate configuration, not an omission.
+
+**Kafka is the practical exception.** Kafka producers and consumers already need schema coordination to interoperate, so a registry is usually standing infrastructure before Hudi enters the picture. For Kafka sources, assume a schema provider is present and ask *which* one rather than *whether* — you're discovering existing infrastructure, not proposing new. For file, JDBC, and other sources, treat it as a genuine yes/no.
+
+Emit one when the user has an authoritative schema source or expects evolution. Pick by where the schema lives:
+
+| Schema lives in | Provider class |
+|---|---|
+| Confluent / compatible registry | `SchemaRegistryProvider` |
+| `.avsc` files you manage | `FilebasedSchemaProvider` |
+| A Hive metastore table | `HiveSchemaProvider` |
+| The upstream JDBC table itself | `JdbcbasedSchemaProvider` |
+| A proto class on the classpath | `ProtoClassBasedSchemaProvider` |
+
+All keys use the `hoodie.streamer.schemaprovider.` prefix.
+
+**File-based** — the common default for DFS sources:
+```
+hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.FilebasedSchemaProvider
+hoodie.streamer.schemaprovider.source.schema.file=<PATH>/source.avsc
+hoodie.streamer.schemaprovider.target.schema.file=<PATH>/target.avsc
+```
+Target defaults to source when omitted — set both only when the transformer changes the schema.
+
+**Hive metastore** — when a synced table already defines the schema:
+```
+hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.HiveSchemaProvider
+hoodie.streamer.schemaprovider.source.schema.hive.database=<DB>
+hoodie.streamer.schemaprovider.source.schema.hive.table=<TABLE>
+# target.schema.hive.database / .table if the target differs
+```
+
+**JDBC** — derive from the upstream table:
+```
+hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.JdbcbasedSchemaProvider
+hoodie.streamer.schemaprovider.source.schema.jdbc.connection.url=<JDBC_URL>
+hoodie.streamer.schemaprovider.source.schema.jdbc.driver.type=<DRIVER_CLASS>
+hoodie.streamer.schemaprovider.source.schema.jdbc.username=<USER>
+hoodie.streamer.schemaprovider.source.schema.jdbc.password=<PASSWORD>
+hoodie.streamer.schemaprovider.source.schema.jdbc.dbtable=<TABLE>
+```
+
+**When no provider is set**, the source infers the schema. Appropriate for stable schemas with no expected evolution — don't add a provider (or the infrastructure behind it) to a pipeline that doesn't need one.
+
+**Not applicable to Spark DataSource writes** — the DataFrame already carries its schema. Schema providers exist for HoodieStreamer only.
 
 ## Cleaner + archival (inline autopilot)
 
@@ -171,10 +269,27 @@ hoodie.clean.commits.retained=<derived>        # if KEEP_LATEST_COMMITS
 
 hoodie.archive.automatic=true
 hoodie.archive.async=false
-hoodie.keep.min.commits=<2 * cleaner.commits.retained>
-hoodie.keep.max.commits=<keep.min.commits + max(4, cleaner.commits.retained * 0.4)>
+hoodie.keep.min.commits=<derived from cadence — see below>
+hoodie.keep.max.commits=<keep.min.commits × 1.2>
 hoodie.commits.archival.batch=10
 ```
+
+**Derive the archival window from commit cadence — never emit a constant.**
+
+```
+commits_per_day  = 1440 / commit_cadence_minutes
+cleaner_commits  = commits_per_day × cleaner_retention_days
+keep.min.commits = max(100, ceil(cleaner_commits × 1.1))
+keep.max.commits = ceil(keep.min.commits × 1.2)
+```
+
+At a 48h cleaner window: 5-min → **634 / 761**. 15-min → **211 / 253**. Hourly → **100 / 120** (floor).
+
+**At daily cadence or slower, emit no cleaner or archival config at all** — leave Hudi's defaults. A table committing once a day accumulates timeline entries far too slowly for the active timeline to be at risk, so overriding adds config surface for nothing.
+
+Archival must outlast the cleaner, hence the +10% margin. See decision-tables.md → Cleaner + archival for the full table and rationale.
+
+**Do not emit 1000 / 1200.** The active-timeline target is ~1000 entries; an archival floor of 1000 means archival can't reclaim until the timeline already sits at the number it's meant to protect.
 
 **Do NOT emit:** `hoodie.clean.fileversions.retained` — file-versions policy not recommended.
 
@@ -208,16 +323,31 @@ hoodie.bloom.index.update.partition.path=true
 ```
 hoodie.index.type=RECORD_LEVEL_INDEX
 hoodie.metadata.record.level.index.enable=true
-hoodie.metadata.record.index.max.filegroup.count=10
-hoodie.metadata.record.index.min.filegroup.count=1
+
+# File-group count is PER PARTITION and DURABLE once the index initializes.
+# Set min == max to pin it; a range lets Hudi estimate instead.
+# Size from projected PER-PARTITION record count — see decision-tables.md → RLI file-group sizing.
+hoodie.metadata.record.level.index.min.filegroup.count=<computed>
+hoodie.metadata.record.level.index.max.filegroup.count=<same as min>
 ```
 
 ### Global Record Level Index
 ```
 hoodie.index.type=GLOBAL_RECORD_LEVEL_INDEX
 hoodie.metadata.global.record.level.index.enable=true
-hoodie.metadata.record.index.max.filegroup.count=10000
-hoodie.metadata.record.index.min.filegroup.count=10
+
+# File-group count is TABLE-WIDE and DURABLE once the index initializes.
+# Set min == max to pin it; a range lets Hudi estimate instead.
+# Size from projected TABLE-WIDE record count — see decision-tables.md → RLI file-group sizing.
+hoodie.metadata.global.record.level.index.min.filegroup.count=<computed>
+hoodie.metadata.global.record.level.index.max.filegroup.count=<same as min>
+```
+
+**Do NOT emit** `hoodie.metadata.record.index.{min,max}.filegroup.count` — these are deprecated aliases for the **global** properties. Using them under a partitioned-RLI config silently sets global knobs.
+
+**Optional, when the user cannot project growth** (see decision-tables.md → RLI file-group sizing):
+```
+hoodie.metadata.record.index.growth.factor=<above 2.0 to buy headroom>
 ```
 
 ### BUCKET (SIMPLE)
@@ -248,13 +378,18 @@ hoodie.datasource.compaction.async.enable=true
 ```
 
 ### Compaction target IO trap
-For projected table size ≥ 1TB + MOR:
+
+**This config is denominated in MEGABYTES, not bytes.** The default is `512000` (= 500 GB). Emitting a byte count here is off by a factor of ~10^6.
+
+It is a per-round IO *ceiling*, not a sizing target — "amount of MBs to spend during compaction run for the LogFileSizeBasedCompactionStrategy... helps bound ingestion latency." Capping it low is what creates the backlog: compaction is throttled below the rate at which log files accumulate, so file groups never catch up and read latency degrades.
+
+Rather than deriving a point value from table size (which just re-creates the same trap at a higher threshold as the table grows), set it high enough that it never binds and let the compaction strategy decide what to compact:
+
 ```
-hoodie.compaction.target.io=2199023255552   # 2TB, adjust based on scale
-# Default is 500GB — insufficient at TB+ scale
+hoodie.compaction.target.io=104857600   # 100 TB expressed in MB — effectively uncapped
 ```
 
-Include as explicit tuning knob in ADR with rationale.
+Include in the ADR with the rationale: the ceiling exists to bound inline-compaction latency, and any workload where compaction must keep pace with ingestion wants it out of the way.
 
 ### Compaction selection strategy
 Default (LogFileSizeBasedCompactionStrategy):
@@ -302,13 +437,34 @@ hoodie.layout.optimize.strategy=LINEAR    # or ZORDER or HILBERT
 hoodie.table.services.incremental.enabled=true
 ```
 
-## Concurrency (V1 = SINGLE_WRITER)
+## Concurrency (V1 default = SINGLE_WRITER)
 
 ```
 hoodie.write.concurrency.mode=SINGLE_WRITER
 ```
 
-Multi-writer configs (OCC, lock providers, LAZY failed writes policy) deferred to V2+ per §7.6.
+Multi-writer configs (OCC, NBCC, lock providers, LAZY failed writes policy) are deferred to V2+ per §7.6 — **with one exception that V1 must handle**, below.
+
+### Standalone HoodieCompactor implies concurrent writers
+
+Whenever the design lands on a **separate `HoodieCompactor` job** (the recommended async path for MOR + Spark DataSource / Spark SQL), two processes now write to the same table. `SINGLE_WRITER` is unsafe in that deployment — emitting it alongside a two-job recommendation is a silent corruption path.
+
+When this path is chosen, the Architect must surface:
+
+- A write-concurrency mode appropriate to concurrent writers (`OPTIMISTIC_CONCURRENCY_CONTROL`).
+- **The same lock provider, configured identically in BOTH jobs** — the ingestion writer and the compactor. Mismatched or absent lock config across the two is the failure mode.
+- Matching failed-writes cleanup policy across both jobs.
+
+```
+# Must be set IDENTICALLY in the ingestion job and the compactor job
+hoodie.write.concurrency.mode=OPTIMISTIC_CONCURRENCY_CONTROL
+hoodie.write.lock.provider=<lock provider class>
+hoodie.cleaner.policy.failed.writes=LAZY
+# ... plus the provider-specific lock config (ZK quorum, DynamoDB table, HMS URI, etc.),
+#     identical on both sides
+```
+
+Full multi-writer rubric (choosing a provider, OCC vs NBCC, conflict resolution) remains V2+. What V1 owes the user is the warning that this deployment requires it, not the full decision tree. If the user is not prepared to set up locking, recommend inline compaction instead and record the latency tradeoff.
 
 ## Sample bundles per archetype
 
@@ -318,7 +474,7 @@ Multi-writer configs (OCC, lock providers, LAZY failed writes policy) deferred t
 hoodie.table.type=COPY_ON_WRITE
 hoodie.datasource.write.recordkey.field=            # empty (auto-gen)
 hoodie.datasource.write.partitionpath.field=event_ingest_date
-hoodie.populate.meta.fields=false                    # or selective
+hoodie.populate.meta.fields=false                    # only valid with no incremental/CDC consumers
 hoodie.datasource.write.hive_style_partitioning=true
 
 # Writer
@@ -331,18 +487,22 @@ hoodie.index.type=SIMPLE
 # Services
 hoodie.clean.automatic=true
 hoodie.clean.policy=KEEP_LATEST_BY_HOURS
-hoodie.clean.hours.retained=48
+hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.md → retention>
+# NOT a fixed 48. At 15-min cadence the safe max is ~5 days (120h); at hourly, ~20 days.
+# A hardcoded 48 silently under-retains on slower cadences.
+#
+# Example below assumes 5-min cadence + 48h cleaner window.
+# Recompute both cleaner and archival for the actual answered cadence.
 
 hoodie.archive.automatic=true
-hoodie.keep.min.commits=1000
-hoodie.keep.max.commits=1200
+hoodie.keep.min.commits=634        # 5-min cadence: 288 commits/day × 2 days × 1.1
+hoodie.keep.max.commits=761        # min × 1.2
 
 hoodie.clustering.async.enabled=true                 # posture (b)
 hoodie.clustering.async.max.commits=5
 
 # Platform
 hoodie.metadata.enable=true
-hoodie.metadata.index.column.stats.enable=false
 
 # Concurrency
 hoodie.write.concurrency.mode=SINGLE_WRITER
@@ -364,6 +524,10 @@ hoodie.table.ordering.fields=updated_at
 # Index
 hoodie.index.type=GLOBAL_RECORD_LEVEL_INDEX
 hoodie.metadata.global.record.level.index.enable=true
+# DURABLE at index initialization. min == max pins the count; a range lets Hudi estimate.
+# Size from projected TABLE-WIDE record count — decision-tables.md → RLI file-group sizing.
+hoodie.metadata.global.record.level.index.min.filegroup.count=<computed>
+hoodie.metadata.global.record.level.index.max.filegroup.count=<same as min>
 
 # Services
 hoodie.compact.inline=true
@@ -371,11 +535,16 @@ hoodie.compact.inline.max.delta.commits=5
 
 hoodie.clean.automatic=true
 hoodie.clean.policy=KEEP_LATEST_BY_HOURS
-hoodie.clean.hours.retained=48
+hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.md → retention>
+# NOT a fixed 48. At 15-min cadence the safe max is ~5 days (120h); at hourly, ~20 days.
+# A hardcoded 48 silently under-retains on slower cadences.
+#
+# Example below assumes 5-min cadence + 48h cleaner window.
+# Recompute both cleaner and archival for the actual answered cadence.
 
 hoodie.archive.automatic=true
-hoodie.keep.min.commits=1000
-hoodie.keep.max.commits=1200
+hoodie.keep.min.commits=634        # 5-min cadence: 288 commits/day × 2 days × 1.1
+hoodie.keep.max.commits=761        # min × 1.2
 
 # Platform
 hoodie.metadata.enable=true
@@ -383,6 +552,83 @@ hoodie.metadata.enable=true
 # Concurrency
 hoodie.write.concurrency.mode=SINGLE_WRITER
 ```
+
+### Sample submit commands
+
+Emit alongside the properties bundle. Parameterize on the derived writer, table type, source class, and operation. **Always distinguish load-bearing flags (derived from design decisions) from environment-specific placeholders (paths, memory, engine/Scala versions) that the flow never asked about.**
+
+#### HoodieStreamer — continuous mode (MOR with free async compaction)
+
+```bash
+spark-submit \
+  --master yarn \
+  --deploy-mode cluster \
+  --class org.apache.hudi.utilities.streamer.HoodieStreamer \
+  --packages org.apache.hudi:hudi-utilities-slim-bundle_<SCALA>:<HUDI_VERSION>,org.apache.hudi:hudi-spark<SPARK_VERSION>-bundle_<SCALA>:<HUDI_VERSION> \
+  --conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
+  --conf spark.sql.extensions=org.apache.spark.sql.hudi.HoodieSparkSessionExtension \
+  --conf spark.kryo.registrator=org.apache.spark.HoodieSparkKryoRegistrar \
+  --executor-memory <MEM> \
+  --num-executors <N> \
+  /path/to/hudi-utilities-slim-bundle_<SCALA>-<HUDI_VERSION>.jar \
+  --props <PATH_TO_PROPERTIES> \
+  --target-base-path <TABLE_BASE_PATH> \
+  --target-table <TABLE_NAME> \
+  --table-type MERGE_ON_READ \
+  --source-class <DERIVED_SOURCE_CLASS> \
+  --schemaprovider-class <DERIVED_SCHEMA_PROVIDER> \
+  --source-ordering-field <ORDERING_FIELD> \
+  --op UPSERT \
+  --continuous \
+  --min-sync-interval-seconds <CADENCE_SECONDS>
+```
+
+**Load-bearing:** `--continuous` is what provides in-process async compaction; without it you get run-once batch semantics and MOR log files grow unbounded. `--table-type`, `--op`, `--source-class`, `--schemaprovider-class`, `--source-ordering-field` all come from derived decisions. `--min-sync-interval-seconds` reflects the answered cadence.
+
+**Never suggest `--disable-compaction` on MOR.**
+
+**Environment-specific — leave these to the user, deliberately.** Master and deploy mode, memory and executor counts, `<SCALA>` (2.12 or 2.13), `<SPARK_VERSION>` in the bundle artifact name, `<HUDI_VERSION>`, and all paths.
+
+The flow does not ask about these and shouldn't: they're facts about the user's build and cluster, not design decisions, and asking would add several infrastructure questions to a design conversation for no design benefit. Emit them as clearly-marked placeholders and say plainly that the user fills them in from their own environment. Don't guess concrete versions — a wrong Scala suffix produces a confusing classpath failure, and a placeholder that looks like a recommendation is worse than one that looks like a blank.
+
+#### HoodieStreamer — run-once (scheduled batch)
+
+Same as above, minus `--continuous` and `--min-sync-interval-seconds`. Schedule externally (cron, Airflow). On MOR without continuous mode, add inline compaction config to the properties file.
+
+#### Spark DataSource
+
+No submit template — the user's own application carries the write. Emit the properties bundle as `.option(...)` calls, plus the required session config.
+
+Batch job:
+```scala
+df.write.format("hudi")
+  .options(hudiOpts)          // the properties bundle
+  .mode(SaveMode.Append)
+  .save("<TABLE_BASE_PATH>")
+```
+
+Continuous job writing from a stream via `forEachBatch`:
+```scala
+sourceStream.writeStream
+  .foreachBatch { (batchDF: DataFrame, _: Long) =>
+    batchDF.write.format("hudi")
+      .options(hudiOpts)
+      .mode(SaveMode.Append)
+      .save("<TABLE_BASE_PATH>")
+  }
+  .option("checkpointLocation", "<CHECKPOINT_PATH>")
+  .trigger(Trigger.ProcessingTime("<CADENCE>"))
+  .start()
+```
+
+Required session config either way:
+```
+spark.serializer=org.apache.spark.serializer.KryoSerializer
+spark.sql.extensions=org.apache.spark.sql.hudi.HoodieSparkSessionExtension
+spark.kryo.registrator=org.apache.spark.HoodieSparkKryoRegistrar
+```
+
+Note that `forEachBatch` is the DataSource path from Hudi's perspective, not the Structured Streaming sink — the writer derivation is the same for both snippets.
 
 ### Mutable fact table (FACT-shape) — Kafka CDC source, date-partitioned, recent-heavy updates, TB-scale
 ```
@@ -399,20 +645,29 @@ hoodie.table.ordering.fields=updated_at
 # Index
 hoodie.index.type=RECORD_LEVEL_INDEX
 hoodie.metadata.record.level.index.enable=true
+# DURABLE at index initialization, and PER PARTITION. min == max pins the count.
+# Size from projected PER-PARTITION record count (total / active partitions).
+hoodie.metadata.record.level.index.min.filegroup.count=<computed>
+hoodie.metadata.record.level.index.max.filegroup.count=<same as min>
 
 # Services
 # No compaction config — HoodieStreamer continuous handles async automatically
 
-# COMPACTION TARGET IO TRAP — bump for TB scale
-hoodie.compaction.target.io=2199023255552            # 2TB
+# COMPACTION TARGET IO TRAP — value is in MB, not bytes
+hoodie.compaction.target.io=104857600                # 100TB in MB — effectively uncapped
 
 hoodie.clean.automatic=true
 hoodie.clean.policy=KEEP_LATEST_BY_HOURS
-hoodie.clean.hours.retained=48
+hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.md → retention>
+# NOT a fixed 48. At 15-min cadence the safe max is ~5 days (120h); at hourly, ~20 days.
+# A hardcoded 48 silently under-retains on slower cadences.
+#
+# Example below assumes 5-min cadence + 48h cleaner window.
+# Recompute both cleaner and archival for the actual answered cadence.
 
 hoodie.archive.automatic=true
-hoodie.keep.min.commits=1000
-hoodie.keep.max.commits=1200
+hoodie.keep.min.commits=634        # 5-min cadence: 288 commits/day × 2 days × 1.1
+hoodie.keep.max.commits=761        # min × 1.2
 
 # Platform
 hoodie.metadata.enable=true

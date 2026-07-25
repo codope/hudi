@@ -27,14 +27,44 @@ Derived from source + pipeline_shape (see question-flow.md Q2.9).
 - Continuous mode: ingestion + async compaction + async clustering in one Spark job.
 - Transformer chain (SQL-based, custom-class, chained) handles most enrichment and CDC-mapping.
 
+### Kafka source class + schema provider
+
+Derived from the record format answered at Q1.2b. Required — without it the writer decision is incomplete and the bundle cannot name a source class.
+
+| Record format | Source class | Schema provider |
+|---|---|---|
+| Avro + schema registry | `AvroKafkaSource` | `SchemaRegistryProvider` |
+| Avro + schema file | `AvroKafkaSource` | `FilebasedSchemaProvider` |
+| JSON | `JsonKafkaSource` | Optional — file-based or registry if schema is managed |
+| Protobuf | `ProtoKafkaSource` | Proto class on classpath |
+
+Avro on Kafka effectively requires a schema provider. For JSON it is optional but recommended in production — inferred schemas drift silently.
+
 **Reach for Spark DataSource for Kafka only when:**
 - Multi-source complexity (multiple Kafka topics + JDBC lookup + multi-table writes).
 - ML DataFrame-native library work.
 - One-off backfills where a HoodieStreamer job feels heavier than needed.
 
-### Non-Kafka sources (DFS, JDBC, another Hudi table, S3/GCS events, Kinesis, Pulsar)
+### In-job DataFrame (derived / silver / gold tables)
 
-HoodieStreamer and DataSource are co-equal defaults. Choose based on pipeline_shape:
+When the data is already a DataFrame inside the user's own Spark job — the output of an ETL query, join, or aggregation — the write is `.write.format("hudi")` at the end of that job.
+
+**Writer: Spark DataSource. Not a choice.** HoodieStreamer exists to poll an external source; here there isn't one. Don't present the HoodieStreamer-vs-DataSource tradeoff, and don't ask Q1.2b (no source class, no schema provider).
+
+Consequences to surface:
+
+- **Async compaction isn't free.** HoodieStreamer continuous mode runs compaction in-process; DataSource can't. If the design lands on MOR, the options are inline compaction (blocks commits periodically) or a standalone `HoodieCompactor` job.
+- **The standalone compactor makes this a concurrent-writer deployment** — two processes writing one table. Requires OCC and an identically-configured lock provider in both jobs. See warnings.md → COMPACTOR_CONCURRENCY_REQUIRED.
+- **No submit-command template applies.** The write lives in the user's application; emit the properties as `.option(...)` calls plus the required session config instead.
+- **Q2.9 (pipeline shape) is largely answered already** — it's custom application code. Still worth confirming whether the write sits inside a `forEachBatch` callback (continuous) or a plain batch job, because that changes the integration snippet, not the writer.
+
+### Non-Kafka external sources (DFS, JDBC, another Hudi table, S3/GCS events, Kinesis, Pulsar)
+
+HoodieStreamer and DataSource are co-equal defaults. Choose based on pipeline_shape.
+
+**Schema provider is optional and orthogonal to source type.** Any provider can pair with any source. Many sources infer their schema, and simple pipelines with no expected evolution commonly set none — that's a valid configuration, not a gap. Ask Q1.2c and map the answer: schema files → `FilebasedSchemaProvider`, Hive metastore → `HiveSchemaProvider`, upstream DB → `JdbcbasedSchemaProvider`, registry → `SchemaRegistryProvider`. See config-templates.md for keys.
+
+**Kafka differs in prior, not in mechanism.** Producers and consumers on a topic already need schema coordination, so a registry is usually in place before Hudi arrives. For Kafka, assume a provider exists and ask which one (Q1.2b already does this). For other sources, whether to have one at all is a real question.
 
 ```
 if pipeline_shape == "config-driven":
@@ -70,14 +100,18 @@ Derived from mutability + experience + update distribution (for mutable).
 
 | Signals | Derived table type + compaction |
 |---|---|
-| Immutable | COW (silent, no dialogue) |
+| Immutable | COW — silent. Don't show the COW/MOR tradeoff table, and don't ask Q1.6 (experience): with no updates there are no log files to merge, so MOR offers nothing and there's no compaction posture to derive. |
 | Mutable + first-time / fire-and-forget | COW |
 | Mutable + some experience | MOR + inline compaction |
 | Mutable + experienced + writer is HoodieStreamer continuous | MOR + async (free) |
 | Mutable + experienced + writer is DataSource/SQL/Structured Streaming | MOR + async via advanced deployment (standalone compactor) |
 | Mutable + some experience + writer is HoodieStreamer continuous | MOR + async (upgrade for free — bonus from writer choice) |
 
-**Provisional in Round 1, refined at §8.3 checkpoint** if writer selection unlocks free async upgrade.
+**Apply the free-async upgrade as soon as the writer is known — do not defer it to the §8.3 checkpoint.**
+
+For Kafka sources the writer is HoodieStreamer by derivation, so this resolves during Round 1 and the upgraded table type should be stated there. Deferring it to §8.3 would hide the upgrade from PROTOTYPING and PRODUCTIONIZING_INITIAL users entirely, since that checkpoint only runs between Rounds 2 and 3 at PRODUCTION_AT_SCALE.
+
+Table type stays genuinely provisional only when the writer is still unknown — non-Kafka sources whose writer is decided by pipeline shape at Q2.9. In that case, revisit table type once Q2.9 lands and surface the upgrade then.
 
 Tradeoff table (in ADR):
 
@@ -166,9 +200,52 @@ elif engine == "spark":
 
 Most index decisions are no longer durable at table creation. RECORD_INDEX (both variants), BLOOM (experimental), col stats, secondary index, expression index — all buildable async on live tables using HoodieIndexer, no rewrite needed.
 
-**BUCKET is the durable exception.** Bucket count fixed at creation.
+**Two durability exceptions:**
+
+1. **BUCKET** — bucket count fixed at creation.
+2. **RLI file-group count** — fixed when the record index is *initialized*. Adding an RLI later is free; **resizing an initialized one is not possible without a table rewrite.** See "RLI file-group sizing" below.
+
+The distinction matters: "index is async-buildable" is true about *adding* an index and false about *resizing* one. Do not tell users the RLI is a fully reversible choice.
 
 Design implication: for smaller mutable tables, recommend lighter index (SIMPLE) with ADR note that RLI can be added later without rewrite. Avoid over-engineering.
+
+### RLI file-group sizing (PRODUCTION_AT_SCALE — durable decision)
+
+Hudi derives the RLI file-group count when the index is initialized, from the records present at that moment multiplied by a growth factor (`hoodie.metadata.record.index.growth.factor`, default **2.0**). That assumes the table is already fully loaded. A table that bootstraps small and then grows repeatedly gets an index sized for its infancy, permanently.
+
+**The count is pinned only when `min == max` (both non-zero).** Otherwise Hudi estimates from record count × growth factor and clamps into the min/max window — i.e. a range hands the decision back to Hudi.
+
+**Config keys — four of them, two per variant. Use the modern keys:**
+
+| Index | Key | Default | Scope |
+|---|---|---|---|
+| Global RLI | `hoodie.metadata.global.record.level.index.{min,max}.filegroup.count` | 10 / 10000 | Table-wide |
+| Partitioned RLI | `hoodie.metadata.record.level.index.{min,max}.filegroup.count` | 1 / 10 | **Per partition** |
+
+`hoodie.metadata.record.index.{min,max}.filegroup.count` are deprecated aliases for the **global** properties. Do not use them for partitioned RLI.
+
+**Sizing formula:**
+
+```
+bytes_per_rli_record = 50      # safe starting point; assumes UUID-shaped record keys
+shard_size_mb        = 500
+file_group_count     = (projected_record_count * bytes_per_rli_record) / 1024 / 1024 / shard_size_mb
+```
+
+- **Global RLI** — apply to the projected table-wide record count.
+- **Partitioned RLI** — apply to the projected *per-partition* record count (projected total / projected active partition count), because the config is per partition.
+- Size for the 3-4 year projection, not today. Under-sizing is unfixable; over-sizing costs little.
+- 50 bytes assumes UUID-shaped keys. Longer record keys mean a larger per-record RLI footprint — scale the constant and say so in the ADR.
+
+Worked example: 40B projected records → `(40_000_000_000 × 50) / 1024 / 1024 / 500` ≈ **3900 file groups**. Emit `min = max = 3900`.
+
+**Why the defaults are a trap.** Partitioned RLI defaults to `min=1, max=10`. With a 1GB max file-group size and 50-byte records, one file group holds ~21.5M records, so a partition needs ~215M projected records before the estimate even reaches the ceiling of 10. Below that it silently under-sizes.
+
+**When the user cannot project record count:**
+
+Recommend they land the **first commit / bulk load with RLI disabled**, then enable it (async build via `HoodieIndexer`, no rewrite). The estimator then sees a truthful record count instead of a near-empty first commit.
+
+This fixes the *bootstrap* problem, not the *growth* problem — the estimator still applies growth factor 2.0 to whatever exists at initialization, so it sizes for today × 2. For a fast-growing table that headroom is consumed quickly and the count is already frozen. Consider raising `hoodie.metadata.record.index.growth.factor` above 2.0, and record a measurable revisit condition: if record count approaches `initial_count × growth_factor`, the RLI is undersized and only a rewrite fixes it.
 
 ## Partitioning
 
@@ -292,10 +369,44 @@ hoodie.clean.hours.retained OR hoodie.clean.commits.retained=<derived>
 
 hoodie.archive.automatic=true
 hoodie.archive.async=false
-hoodie.keep.min.commits=2 * cleaner.commits.retained
-hoodie.keep.max.commits=keep.min.commits + max(4, cleaner.commits.retained * 0.4)
+hoodie.keep.min.commits=<derived — see below>
+hoodie.keep.max.commits=<derived — see below>
 hoodie.commits.archival.batch=10
 ```
+
+**Archival window derivation — from commit cadence, never a constant.**
+
+Archival must outlast the cleaner. If instants are archived while the cleaner still treats those file versions as live, incremental and time-travel readers lose the timeline entries they depend on. So the window is always the cleaner window plus a margin.
+
+```
+commits_per_day  = 1440 / commit_cadence_minutes
+cleaner_commits  = commits_per_day × cleaner_retention_days
+                   (or cleaner.commits.retained directly, when the policy is KEEP_LATEST_COMMITS)
+
+keep.min.commits = max(100, ceil(cleaner_commits × 1.1))    # cleaner window + ~10% margin
+keep.max.commits = ceil(keep.min.commits × 1.2)
+```
+
+**At daily cadence or slower, emit nothing.** Don't set cleaner or archival config at all — leave Hudi's out-of-the-box defaults in place. A table committing once a day accumulates timeline entries so slowly that the active timeline is nowhere near its limits, and there is nothing for us to protect it from. Overriding here adds config surface for no benefit.
+
+The floor of 100 covers the middle ground, where derivation produces a number small enough to make look-back impractical but the cadence is still fast enough that the defaults aren't a good fit.
+
+Worked values at a 48h cleaner window:
+
+| Cadence | commits/day | Cleaner commits | +10% | `keep.min.commits` | `keep.max.commits` |
+|---|---|---|---|---|---|
+| 5 min | 288 | 576 | 634 | **634** | 761 |
+| 15 min | 96 | 192 | 211 | **211** | 253 |
+| 1 hour | 24 | 48 | 53 | **100** (floor) | 120 |
+| Daily or slower | ≤1 | — | — | **emit nothing** | **emit nothing** |
+
+This replaces the older `2 × cleaner.commits.retained` rule. The +10% relationship applies uniformly, whichever cleaner policy is in force.
+
+Same principle as not emitting `hoodie.metadata.index.column.stats.enable=false`: config that restates a default is noise. Emit what changes behavior.
+
+**Never emit a fixed 1000 / 1200.** The active-timeline target is ~1000 entries; an archival floor at 1000 leaves no headroom above the number it exists to protect.
+
+**Bucketization note:** archival bucketizes by instant type — ingestion commits and table-service commits (clean, compaction, clustering, rollback) are tracked separately with their own thresholds. `keep.min.commits` governs the ingestion bucket. The ~6-entries-per-commit figure behind the active-timeline math is the combined count across buckets, which is why the window can be sized off ingestion commits without the timeline overrunning.
 
 **Archival bucketization:** archival bucketizes by instant type. Two buckets: ingestion commits and table-service commits. Each has its own min/max threshold. 2x ratio holds because per-bucket accounting keeps combined active timeline bounded.
 
@@ -348,27 +459,51 @@ For immutable + record size ≤1KB: prompt (see question-flow.md Q2.7).
 
 Rule engine mapping:
 
+**At 1.2.0 the rule is simple: any incremental or CDC consumer → keep all meta fields.** Record size doesn't change this. The config is all-or-nothing and incremental queries require `_hoodie_commit_time`, so there is no middle option to trade storage against.
+
 | Record size | Incremental / CDC needed? | Recommendation |
 |---|---|---|
-| >1KB or unknown | any | Keep all meta fields |
-| 200B–1KB | Yes | Keep all meta fields (needed for incremental) |
-| 200B–1KB | No | Offer selective (`_hoodie_commit_time` only) |
-| <200B | Yes | Keep all meta fields; ADR notes storage cost |
-| <200B | No | Offer disable-entirely OR selective |
+| any | **Yes** | **Keep all meta fields — no alternative at 1.2.0.** Note the storage cost in the ADR. |
+| >1KB or unknown | No | Keep all — overhead is rounding error |
+| 200B–1KB | No | Keep all — saving is marginal at this size |
+| <200B | No | Offer disable-entirely |
 
-### Incremental relation nuance
+Only the last row is a real decision. Everything else is determined.
 
-Disabling meta fields loses Hudi's native efficient incremental relation (uses `_hoodie_commit_time` + timeline metadata to identify touched partitions/file groups). **Falls back to snapshot-read + commit-time filter (like Delta/Iceberg). Still functional**, just slower at scale.
+### Selective mode is not available at 1.2.0
 
-Selective mode preserves the native fast path (still populates `_hoodie_commit_time`).
+At **1.2.0**, `hoodie.populate.meta.fields` is a boolean — all meta fields or none. Do not offer a selective option; there is no config to emit for it.
 
-**Framing:** don't tell users they're "giving up a lot." Present each option's actual cost concretely.
+**Coming after 1.2.0** (apache/hudi#19205, targeting 1.3.0, not yet merged): `hoodie.meta.fields.mode`, a comma-separated list of meta columns to populate when `hoodie.populate.meta.fields=false`. Allowed tokens are `_hoodie_commit_time` and `_hoodie_file_name`.
+
+| `populate.meta.fields` | `meta.fields.mode` | Effective mode |
+|---|---|---|
+| `true` (default) | ignored | ALL |
+| `false` | empty | NONE |
+| `false` | `_hoodie_commit_time` | COMMIT_TIME_ONLY |
+| `false` | `_hoodie_file_name` | FILE_NAME_ONLY |
+| `false` | both | COMMIT_TIME_AND_FILE_NAME |
+| `true` | non-empty | rejected at writer init |
+
+When that lands, COMMIT_TIME_ONLY becomes the balanced middle for small-record append-only tables — it preserves incremental queries while dropping the other four fields. Constraints to respect when adding it: **CoW only** (MoR rejected at writer init pending a follow-up), **Spark only** (Flink RowData and Java client rejected), and **immutable at table creation** (settable only at init, via hudi-cli, or during upgrade). Pre-1.3.0 readers see such a table as NONE.
+
+Until it ships in a release the Skill targets, the choice remains binary.
+
+### What disabling actually costs
+
+Hudi's config documentation: *"When disabled, no meta fields are populated and incremental queries will not be functional. This is only meant to be used for append only/immutable data for batch processing."*
+
+Treat incremental queries as **unavailable**, not degraded. An earlier version of this file claimed they fall back to a slower snapshot-read + filter path and remain "still functional" — that is wrong, and it is the kind of error that produces a table needing a rewrite to fix.
+
+**Hard gate:** if any consumer is incremental or streaming, don't offer the disable option. Keep meta fields and record the storage cost in the ADR.
+
+**Framing:** state the cost plainly. Disabling is a legitimate choice for append-only batch data with a closed, non-incremental consumer set — and a trap for anything else.
 
 ### Mutual exclusion with auto-gen
 
 Auto-gen keys require `_hoodie_record_key` materialized. Two coherent immutable presets:
 - User-provided natural key + disable meta fields entirely → max storage saving.
-- Auto-gen key + keep meta fields (or selective) → efficient ingest, no stable identity.
+- Auto-gen key + keep meta fields → efficient ingest, no stable identity.
 
 ## Read behavior
 

@@ -29,9 +29,41 @@ The conversation has three parts:
 
 1. **Tier gate** — a single scoping question to figure out which downstream questions fire.
 2. **Rounds 1-3** — workload questions, gated conditionally by tier.
-3. **Output** — Architecture Decision Record + config bundle.
+3. **Output** — Architecture Decision Record + config bundle + runnable submit command.
 
 Load `references/question-flow.md` for the full round-by-round question list with conditional gating.
+
+## Question delivery
+
+**Where an interactive question widget is available** (e.g. Claude Code's `AskUserQuestion`), use it for closed-set questions. It renders selectable options and lets the user see their choices accumulate. Where no widget exists (plain chat UI, MCP client), fall back to numbered prose blocks — the question content is identical either way.
+
+**Widget-first, at every tier.** Every question opens as a widget wherever an option set can be derived. Free text appears only as a short follow-up to capture a name the widget has already scoped.
+
+A widget **cannot collect free text** — its options are predefined, and "Other" is a user-typed escape hatch, not a labelled input. So decompose any question that needs a name into two turns: the decision (widget), then the name (conversational).
+
+| Question | Widget turn — the decision | Free-text follow-up |
+|---|---|---|
+| Record key | Single column / Composite | "Which column?" / "Which columns?" |
+| Ordering field | Timestamp column / Version or sequence number / Not sure | "Which column?" |
+| Partitioning | Date-based / Business dimension / Composite / None / You pick | "Which column?" (skipped for none and you-pick) |
+| Partition granularity | Daily / Monthly / Hourly | — |
+
+Batch the free-text follow-ups: once several shapes are settled, ask for all the column names in one turn rather than one at a time.
+
+**Other widget rules:**
+
+- **Batch at most 3 questions per screen**, and **never split a gating question from the question it gates** (mutability and update-distribution belong together).
+- **Tradeoff tables go in prose immediately before the widget call**, never crammed into the question text. Per-option consequence belongs in each option's description.
+- **Option sets must cover the real world.** If a user reaches for "Other," treat it as a signal the options were too narrow — a Spark DataFrame from an upstream ETL job is a source, an exact retention figure is an answer. Accept it and re-derive.
+- Where no widget exists (plain chat UI, MCP client), fall back to numbered prose blocks. The question content is identical.
+
+## Disclosed defaults
+
+At tiers where a decision would otherwise be skipped silently, **state the default and get consent** rather than assuming. Show what will be applied, why, and flag any durable item inline. Then a single consent question: use these defaults, or set them yourself.
+
+**If the user chooses to set them:** present a multi-select router asking which items they want to own, then prompt only for those. Everything unclaimed keeps its default. Don't emit a wall of prose asking for several free-text values at once.
+
+**Validation questions travel with the decision they validate.** If a user names a partition column at any tier, ask partition-column stability and consumer read filters *at that moment* — those gate index scope and the Vice 1 check, and are useless if deferred to a round that won't run.
 
 ## Tier gate (fires first, before anything else)
 
@@ -49,9 +81,16 @@ Internal labels for these four tiers: `EXPLORATION`, `PROTOTYPING`, `PRODUCTIONI
 **What fires per tier:**
 
 - **EXPLORATION** — Round 1 abbreviated, concept-explanation focused. May not produce a full ADR — often a "here's what your workload would look like as a Hudi table" narrative. Replace hard questions with explanations ("Hudi supports Spark and Flink — Spark is most common; I'll assume Spark unless you say otherwise").
-- **PROTOTYPING** — Round 1 only. Minimum design, get-to-first-commit fast. Defaults everywhere: SIMPLE index, inline services, single writer, MDT on, COW.
+- **PROTOTYPING** — Round 1, then a **disclosed-defaults consent block** for table size / partitioning / retention, then **hard-ask the non-defaultable facts**: record key and ordering field when mutable. Goal is a genuinely runnable first table, not a sketch. A prototyping ADR must not ship placeholder values in its config bundle.
 - **PRODUCTIONIZING_INITIAL** — Rounds 1 + 2. Full mutation/identity/partitioning questions. Production-safe defaults.
 - **PRODUCTION_AT_SCALE** — All rounds. Full rubric. Guardrails strict. All revisit conditions surfaced.
+
+**Non-defaultable facts.** Some values have no safe default and must be asked wherever they apply, at every tier:
+
+- **Record key** (mutable workloads) — auto-generated keys are immutable-only and incompatible with upsert semantics.
+- **Ordering / precombine field** (mutable workloads) — decides which version wins when two updates for the same key land in one batch.
+- **Partition column name**, when the user opts into partitioning.
+- **Source record format** (Kafka + HoodieStreamer) — derives the source class and schema provider.
 
 ## Rounds — see references/question-flow.md
 
@@ -84,12 +123,17 @@ The rule engine has a set of named warnings that fire on specific workload signa
 
 ## Output — see references/adr-template.md and references/config-templates.md
 
-Produce two artifacts at the end:
+**Before generating, offer one final revisit.** Show every answer collected, then ask whether to generate or amend something first. This is a single gate immediately before output — not one per round. Per-round answer echoes stay informational. If the user proceeded past any warning during the flow, restate those choices in the review so they get one last chance to walk one back.
+
+Produce three artifacts at the end:
 
 1. **Architecture Decision Record (ADR)** — structure per `references/adr-template.md`. Includes workload summary, key design decisions with tradeoff tables + rationale, durability table for one-way decisions, config bundle, operational playbook, measurable revisit conditions.
 2. **Configuration bundle** — the `hoodie.*` properties, grouped per `references/config-templates.md`.
+3. **Sample submit command** — a runnable `spark-submit` (or Flink equivalent) for the derived writer, per `references/config-templates.md`. Call out which flags are load-bearing (derived from design decisions) versus environment-specific (paths, memory, engine and Scala versions the flow never asked about). Environment-specific values are placeholders the user must verify.
 
-**Revisit conditions must be measurable.** Not "revisit if write amp becomes an issue." Yes: "if p95 commit duration exceeds 5 min at >1TB, first knob is `hoodie.upsert.shuffle.parallelism`; if that doesn't help, evaluate switching to MOR (requires table rewrite)."
+**Revisit conditions must be measurable.** Not "revisit if write amp becomes an issue." Yes: "if p95 commit duration exceeds the ingestion interval on a COW table above 1TB, evaluate switching to MOR — note this requires a table rewrite, so decide before the table grows further."
+
+A good revisit condition names an observable threshold, the first thing to check, and whether acting on it is reversible.
 
 ## Decision UX contract
 

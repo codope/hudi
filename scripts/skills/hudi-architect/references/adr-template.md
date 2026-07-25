@@ -26,18 +26,26 @@ Bullet list of what the user answered directly:
 - Retention lookback: <user-desired>, clamped to <safe-max>
 - Record key: <column(s)> or auto-gen
 - Partitioning: <column(s) + granularity> or unpartitioned
-- Meta-fields mode: <keep all / selective / disable entirely>
+- Meta-fields mode: <keep all / disable entirely>
 - Small-files posture: <a/b/c>  (if immutable)
 - Pipeline shape: <config-driven/custom-code/SQL/streaming>
 - Writer: <derived writer>
 - Table type: <COW / MOR-inline / MOR-async>
 - Index: <derived index type>
 
-## 3. Assumptions
+## 3. Assumptions and consented defaults
 
-What the Architect assumed when user data was silent or ambiguous. Explicit list.
+Two distinct categories — keep them separate.
+
+**Consented defaults** — values the Architect proposed and the user explicitly accepted (the disclosed-defaults block). These rest on stronger footing than assumptions; the user saw them and agreed.
+- e.g., "Retention 48h — proposed as prototype default, user accepted."
+
+**Assumptions** — what the Architect inferred when the user was silent or a question didn't fire at this tier. These are unverified.
 - e.g., "Assumed daily partition granularity for date-based partitioning."
 - e.g., "Assumed single writer (multi-writer deferred to future rubric)."
+- e.g., "Consumer read patterns not captured at this tier — Vice 1 alignment unverified."
+
+If a tier skipped a question that gates a durable decision, say so here explicitly. A reader must be able to tell which parts of the design were checked and which were guessed.
 
 ## 4. Recommended Architecture
 
@@ -83,6 +91,18 @@ Cover at minimum:
 - Small-files posture (if immutable)
 - Meta-fields mode (if immutable + small records)
 
+## 5b. Warnings accepted and recommendations overridden
+
+Every warning the user chose to proceed past, and every recommendation they declined, gets an entry here — with the original advice, what they chose instead, and a measurable trigger for revisiting.
+
+Without this, a reader cannot tell a derived decision from one made against advice, and an accepted risk silently disappears from the record.
+
+| What fired | Recommended | User chose | Measurable revisit trigger |
+|---|---|---|---|
+| `<warning name or recommendation>` | `<what the Architect advised>` | `<what the user decided>` | `<observable condition that means revisit>` |
+
+Cross-reference these into §11 Risks. An accepted warning is a standing risk, not a closed question.
+
 ## 6. Durability Table
 
 Structured table listing every one-way decision:
@@ -90,9 +110,13 @@ Structured table listing every one-way decision:
 | Decision | What's locked in | Cost of unlocking | Revisit trigger |
 |---|---|---|---|
 | Table type (COW/MOR) | Cannot switch without rewrite | Table rewrite | Per revisit conditions in §11 |
-| Partition column(s) + granularity | Cannot change scheme | Table rewrite | If dominant read filter shifts |
+| Partition column(s) + granularity | Fixed at table creation — including the choice to be unpartitioned | New table + full data rewrite (no ALTER path) | If dominant read filter shifts, or projected size crosses ~500GB while unpartitioned |
 | Record key column(s) | Cannot change | Table rewrite | If key semantic changes |
+| Bucket count (BUCKET index only) | Fixed at creation | Table rewrite | If key cardinality outgrows the bucket count |
+| RLI file-group count (RLI only) | Fixed when the index initializes | Table rewrite | If record count approaches the sized projection |
 | ...include only decisions relevant to this design... |
+
+**Do not describe an RLI as a fully reversible choice.** *Adding* a record index later is free (async build via `HoodieIndexer`, no rewrite). *Resizing* an initialized one is not — the file-group count is durable, like bucket count. If the design emits RLI config, the count belongs in this table.
 
 ## 7. Alternatives Considered
 
@@ -139,10 +163,25 @@ read.data.skipping.enabled=true
 
 ### 9.5 Workload-dependent tuning variables
 \`\`\`
-# These are the knobs Operations Agent may tune later
-hoodie.upsert.shuffle.parallelism=<derived from expected batch size>
-# etc.
+# Knobs the Operations Agent may tune later, once there is observed behavior to tune against.
+# Emit only what this design actually determined — leave the rest out.
 \`\`\`
+
+**Do not emit `hoodie.upsert.shuffle.parallelism`.** Hudi derives parallelism from the incoming DataFrame's Spark partition count and reuses it. Setting it explicitly overrides a value that is usually already right, and the flow has no basis for a better one — it never captures batch volume, and parallelism depends on executor cores and partition skew as much as row count. This is tuning territory: it belongs to observed shuffle behavior, not design time.
+
+Same principle as the platform-managed section — emit config that changes behavior, not config that restates or overrides a sensible default.
+
+### 9.6 Sample submit command
+
+A runnable `spark-submit` (or Flink equivalent) for the derived writer, per config-templates.md → Sample submit commands. Not applicable to Spark DataSource, where the write lives in the user's own application code.
+
+Split the flags explicitly:
+
+**Load-bearing** — derived from design decisions in this ADR. Changing these changes the design (`--continuous`, `--table-type`, `--op`, `--source-class`, `--schemaprovider-class`, `--source-ordering-field`).
+
+**Environment-specific** — placeholders the flow deliberately doesn't ask about: master and deploy mode, executor memory and count, Scala version, Spark version in the bundle artifact name, Hudi version, and all paths. These come from the user's build and cluster, not from the design, and collecting them would add infrastructure questions to a design conversation for no design benefit.
+
+Never present environment-specific values as though they were derived. Mark them as blanks the user fills in.
 
 ## 10. Operational Playbook
 
@@ -168,7 +207,7 @@ Practical guidance for running this table:
 **Which settings should NOT be changed casually:**
 - Durable properties (list from §6).
 - Bucket count (if BUCKET index).
-- Meta-fields config (if disabled or selective).
+- Meta-fields config (if disabled).
 
 **Sizing note:**
 - Target visibility interval: <X> minutes (as stated intent).

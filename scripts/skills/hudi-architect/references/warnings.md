@@ -15,6 +15,8 @@ Format for each: name, trigger condition, message template, when it fires.
 
 **When fires:** immediately after user names a partition column in Q2.4, once read pattern (Q2.1) is known.
 
+**When it can't fire (PROTOTYPING — no Q2.1).** Apply the default and state the limitation. Be explicit that partitioning — including the decision to stay unpartitioned — is fixed at table creation: changing it means a new table and a full rewrite, with no ALTER path. Offer to ask the read-pattern questions if the user wants to partition now. Carry the disclaimer into the ADR as a revisit condition tied to projected size.
+
 ### VICE_2_OVERLY_GRANULAR_PARTITIONING
 
 **Triggered when:** `partition_size = table_size / partition_count < 100MB` at projected steady state.
@@ -84,6 +86,8 @@ Format for each: name, trigger condition, message template, when it fires.
 
 **When fires:** after Q1.6 (experience) when Q1.4 + Q1.5 + Q2.2 signals are available. Ask user to reconcile.
 
+**When it can't fire (PROTOTYPING — no Q2.2).** Don't derive table type silently. Default to COW, state the COW/MOR tradeoff plainly, name the condition that would change the answer (large table + uniform updates), flag that table type is durable, and offer the override. The user should leave knowing they made a choice, not knowing a default was applied. Carry the call-out into the ADR's key-decisions section.
+
 ### UPDATE_TAIL_VS_RETENTION
 
 **Triggered when:** update-tail estimate (from Q2.3 follow-up) > retention window (Q2.3 main answer).
@@ -109,6 +113,8 @@ Format for each: name, trigger condition, message template, when it fires.
 
 **When fires:** during Q2.3 retention question, immediately when user's desired value exceeds safe max.
 
+**If the user responds by changing commit cadence, recompute the safe max against the new cadence and restate it before moving on.** The warning offers slowing the cadence as a remedy, so the Architect must follow through — don't leave the original clamped figure standing after the input it derived from has changed.
+
 ### SUB_5_MIN_CADENCE_UNSTABLE
 
 **Triggered when:** commit cadence < 5 min AND computed safe retention < 1 day.
@@ -123,9 +129,22 @@ Format for each: name, trigger condition, message template, when it fires.
 **Triggered when:** MOR + projected table size ≥ 1TB.
 
 **Message:**
-> "For MOR at TB-scale, `hoodie.compaction.target.io` defaults to 500GB per compaction round. At this scale, file groups accumulate uncompacted → log files grow forever → read latency degrades. Community has seen production workloads hit this. Bump to 2-5TB in the config bundle."
+> "`hoodie.compaction.target.io` is a per-round IO ceiling, defaulting to 500GB. It exists to bound how long inline compaction can block a commit. At your scale that ceiling throttles compaction below the rate log files accumulate — file groups never catch up, log files grow without bound, and snapshot read latency degrades. Setting it effectively uncapped and letting the compaction strategy decide what to compact."
+
+**Config note:** the value is in **megabytes, not bytes** (default `512000` = 500GB). Emit a large finite MB value such as `104857600` (100TB). Do not derive a point value from table size — that just re-creates the same ceiling at a higher threshold as the table grows.
 
 **When fires:** after table type + projected size are known. Add to ADR as explicit tuning knob.
+
+### COMPACTOR_CONCURRENCY_REQUIRED
+
+**Triggered when:** the design lands on a standalone `HoodieCompactor` job (MOR + a writer that can't run async compaction in-process — Spark DataSource, Spark SQL).
+
+**Message:**
+> "A separate compactor job means two processes write to this table, so `SINGLE_WRITER` is unsafe. Both jobs need `OPTIMISTIC_CONCURRENCY_CONTROL`, the same lock provider with identical configuration on both sides, and a matching failed-writes cleanup policy. Mismatched or missing lock config across the two jobs risks corruption. If setting up a lock provider isn't practical, use inline compaction instead and accept the per-batch latency."
+
+**When fires:** immediately when the standalone-compactor path is selected or recommended. Must appear in the ADR's operational playbook, not only in dialogue.
+
+Full multi-writer rubric (provider choice, OCC vs NBCC, conflict resolution) stays V2+. V1 owes the user the requirement, not the decision tree.
 
 ### THREE_CONCURRENT_SERVICES
 
