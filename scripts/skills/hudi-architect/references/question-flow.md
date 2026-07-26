@@ -126,7 +126,7 @@ Derives table type + compaction posture (see decision-tables.md → table-type).
 
 **Delivery:** Round 1 batches into widget screens of at most 3 questions each.
 
-- **Screen 1** — engine, source, cadence. Fold in the Kafka record-format question (Q1.2b) when the source is Kafka.
+- **Screen 1** — engine, source, cadence. Fold in the Kafka record-format question (Q1.2b) when the source is Kafka — a gated follow-up that exists only because of an answer on the same screen may share it as a fourth item (see SKILL.md batching rule).
 - **Screen 2** — mutability and update distribution. Keep these together: Q1.4 gates Q1.5, and splitting them strands the gate.
 - **Screen 3** — experience (Q1.6), preceded by the COW/MOR tradeoff table.
 
@@ -411,9 +411,17 @@ Only reach this moment when the writer was genuinely undetermined until Q2.9.
 
 ### Q3.1 — Writers
 
-> "Single or multiple independent writers?"
+> "Does anything else ever write this table — another pipeline, a backfill job, a GDPR/cleanup job, a standalone compactor? Even occasionally counts."
 
-V1 assumes single writer. Multi-writer deferred to future rubric — if user says multiple, note it as an ADR flag and proceed assuming single for now.
+**Single writer** → emit `hoodie.write.concurrency.mode=SINGLE_WRITER`.
+
+**User declares any second writer** → `SINGLE_WRITER` is unsafe: two OCC-less processes writing one table is the silent corruption path named in config-templates.md → Concurrency. Do **not** proceed assuming single. Instead:
+
+- Emit the OCC skeleton (`OPTIMISTIC_CONCURRENCY_CONTROL` + `hoodie.write.lock.provider=<lock provider class>` + `hoodie.clean.failed.writes.policy=LAZY`), with the identical-in-every-writing-job requirement stated.
+- Record a **blocking open question** in ADR §13: a lock provider must be chosen and configured in every writing job before go-live. Provider selection is V2+ scope — point to the Hudi concurrency-control docs.
+- Record the declared writers in ADR §2 Confirmed Facts. A declared multi-writer deployment is a confirmed fact, never an "assumption."
+
+Full multi-writer rubric (provider choice, OCC vs NBCC, conflict resolution) remains deferred — V1 owes the user the requirement and a bundle that is safe as emitted, not the decision tree.
 
 ### Q3.1b — Record count and growth (fires when the derived index is RLI)
 

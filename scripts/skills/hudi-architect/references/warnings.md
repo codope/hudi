@@ -59,7 +59,7 @@ Format for each: name, trigger condition, message template, when it fires.
 **Message:**
 > "Warning: at ~`<count>` partitions, MDT `files` partition grows large, listing operations get expensive. Consider coarsening granularity or dropping composite dimension."
 
-**When fires:** at §8.3 derived-fact synthesis checkpoint.
+**When fires:** at the §8.3 derived-fact synthesis checkpoint (PRODUCTION_AT_SCALE). At PRODUCTIONIZING_INITIAL §8.3 never runs — fire during the Q2.4 partitioning discussion, as soon as table size (Q2.2) and the partition scheme make the projection computable.
 
 ### PROJECTED_PARTITION_COUNT_RED
 
@@ -100,7 +100,7 @@ Format for each: name, trigger condition, message template, when it fires.
 > - (b) Keep retention and expect consumers to check in more frequently.
 > - (c) Reduce commit cadence to allow wider safe retention."
 
-**When fires:** at §8.3 derived-fact synthesis checkpoint.
+**When fires:** at the §8.3 derived-fact synthesis checkpoint (PRODUCTION_AT_SCALE). At PRODUCTIONIZING_INITIAL §8.3 never runs — fire at the end of Round 2, before the final revisit gate, as soon as both inputs (tail estimate, retention window) exist. A warning whose only firing point is a checkpoint the tier skips is a warning that never fires.
 
 ## Config trap warnings
 
@@ -109,7 +109,7 @@ Format for each: name, trigger condition, message template, when it fires.
 **Triggered when:** `user_desired_lookback > safe_max_retention` (computed from commit cadence).
 
 **Message:**
-> "You asked for `<desired>` of lookback, but at `<commit_cadence>`-minute commit cadence that would push the active timeline past its healthy range and degrade latency. Clamping to `<safe_max>`. To widen retention, either reduce commit cadence (e.g., 15-min instead of 5-min → 7 days safe) or accept the shorter window."
+> "You asked for `<desired>` of lookback, but at `<commit_cadence>`-minute commit cadence that would push the active timeline past its healthy range and degrade latency. Clamping to `<safe_max>`. To widen retention, either reduce commit cadence (e.g., 15-min instead of 5-min → ~5 days safe) or accept the shorter window."
 
 **When fires:** during Q2.3 retention question, immediately when user's desired value exceeds safe max.
 
@@ -153,7 +153,7 @@ Full multi-writer rubric (provider choice, OCC vs NBCC, conflict resolution) sta
 **Message:**
 > "Three concurrent services in one Spark job: ingestion + async compaction + async clustering. Default 1:1:1 resource split works for balanced workloads. If ingestion falls behind, shift weight toward `--delta-sync-scheduling-weight`. If compaction backlog grows, shift toward `--compact-scheduling-weight`. Operations Agent territory."
 
-**When fires:** at §8.3 derived-fact synthesis checkpoint.
+**When fires:** at the §8.3 derived-fact synthesis checkpoint (PRODUCTION_AT_SCALE). At tiers where §8.3 doesn't run, fire at the moment the third concurrent service is enabled.
 
 ### WRITER_COMPACTION_MISMATCH
 
@@ -162,7 +162,9 @@ Full multi-writer rubric (provider choice, OCC vs NBCC, conflict resolution) sta
 **Message:**
 > "Your writer choice (`<writer>`) means async compaction requires deploying a separate `HoodieCompactor` job — an advanced deployment pattern. Alternative: switch writer to HoodieStreamer continuous mode, and get async compaction for free in-process. Which fits?"
 
-**When fires:** after Q2.9 (pipeline shape → writer) is known, only if MOR + experienced signals were captured earlier.
+**When fires:** after Q2.9 (pipeline shape → writer) is known, only if MOR + experienced signals were captured earlier. For in-job DataFrame sources the writer is known in Round 1 — fire there instead.
+
+**In-job DataFrame exception:** when the source is a DataFrame produced inside the user's own Spark job, the "switch to HoodieStreamer continuous" alternative does not exist — HoodieStreamer polls an external source, and there isn't one (question-flow.md Q1.2). Drop that clause and offer only the real choices: inline compaction, or the standalone `HoodieCompactor` with its concurrency requirements.
 
 ## Growing set
 

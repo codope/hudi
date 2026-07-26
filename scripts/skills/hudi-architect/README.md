@@ -14,6 +14,8 @@ Target Hudi version: **1.2.0**.
 
 ## How to invoke
 
+> **Data engineering / ETL teams:** see [RUNBOOK.md](RUNBOOK.md) for a step-by-step guide — setup, a pre-session workload checklist, how to read the ADR output, and current limitations.
+
 ### As a Claude Code Skill
 
 Copy this directory into your Claude Code skills location:
@@ -45,6 +47,16 @@ Even without invoking as a Skill, the files in `references/` are readable design
 - `adr-template.md` — the structure of the ADR output.
 
 The Skill itself is defined in `SKILL.md`.
+
+### Config-key validation
+
+Every `hoodie.*` key mentioned in `SKILL.md` and `references/` is checked against the actual `ConfigProperty` definitions in the Hudi source tree:
+
+```bash
+python3 scripts/skills/hudi-architect/validate_config_keys.py
+```
+
+Run it after any edit to the reference files (exit 1 lists unknown keys). Intentional exceptions — e.g. future-version keys the references discuss but never emit — live in `validate_config_keys_allowlist.txt` with a comment each.
 
 ## What to look for during review
 

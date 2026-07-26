@@ -171,10 +171,12 @@ Target Hudi 1.2.0 (implied by dependency version, not a runtime config).
 
 Derived from source + record format (question-flow.md Q1.2b).
 
+**The source class and schema provider are CLI flags, not properties.** They travel on the submit command as `--source-class` and `--schemaprovider-class` (see Sample submit commands). There are **no** `hoodie.streamer.source.class` / `hoodie.streamer.schemaprovider.class` properties — such lines are silently ignored, and a job that relies on them falls back to HoodieStreamer's default source class and reads the wrong source type. Each block below lists the real properties and notes the matching CLI flags in a comment.
+
 ### Kafka + Avro + schema registry
 ```
-hoodie.streamer.source.class=org.apache.hudi.utilities.sources.AvroKafkaSource
-hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.SchemaRegistryProvider
+# CLI flags: --source-class org.apache.hudi.utilities.sources.AvroKafkaSource
+#            --schemaprovider-class org.apache.hudi.utilities.schema.SchemaRegistryProvider
 hoodie.streamer.schemaprovider.registry.url=<SCHEMA_REGISTRY_URL>/subjects/<TOPIC>-value/versions/latest
 hoodie.streamer.source.kafka.topic=<TOPIC>
 bootstrap.servers=<KAFKA_BOOTSTRAP>
@@ -183,8 +185,8 @@ auto.offset.reset=latest
 
 ### Kafka + Avro + schema file
 ```
-hoodie.streamer.source.class=org.apache.hudi.utilities.sources.AvroKafkaSource
-hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.FilebasedSchemaProvider
+# CLI flags: --source-class org.apache.hudi.utilities.sources.AvroKafkaSource
+#            --schemaprovider-class org.apache.hudi.utilities.schema.FilebasedSchemaProvider
 hoodie.streamer.schemaprovider.source.schema.file=<PATH>/source.avsc
 hoodie.streamer.schemaprovider.target.schema.file=<PATH>/target.avsc
 hoodie.streamer.source.kafka.topic=<TOPIC>
@@ -194,16 +196,16 @@ auto.offset.reset=latest
 
 ### Kafka + JSON
 ```
-hoodie.streamer.source.class=org.apache.hudi.utilities.sources.JsonKafkaSource
+# CLI flag: --source-class org.apache.hudi.utilities.sources.JsonKafkaSource
 hoodie.streamer.source.kafka.topic=<TOPIC>
 bootstrap.servers=<KAFKA_BOOTSTRAP>
 auto.offset.reset=latest
 ```
-Schema provider optional — supply `FilebasedSchemaProvider` or `SchemaRegistryProvider` if the schema is managed rather than inferred.
+Schema provider optional — pass `--schemaprovider-class` for `FilebasedSchemaProvider` or `SchemaRegistryProvider` if the schema is managed rather than inferred.
 
 ### Kafka + Protobuf
 ```
-hoodie.streamer.source.class=org.apache.hudi.utilities.sources.ProtoKafkaSource
+# CLI flag: --source-class org.apache.hudi.utilities.sources.ProtoKafkaSource
 hoodie.streamer.source.kafka.topic=<TOPIC>
 hoodie.streamer.source.kafka.proto.value.deserializer.class=<PROTO_CLASS>
 bootstrap.servers=<KAFKA_BOOTSTRAP>
@@ -226,11 +228,11 @@ Emit one when the user has an authoritative schema source or expects evolution. 
 | The upstream JDBC table itself | `JdbcbasedSchemaProvider` |
 | A proto class on the classpath | `ProtoClassBasedSchemaProvider` |
 
-All keys use the `hoodie.streamer.schemaprovider.` prefix.
+All property keys use the `hoodie.streamer.schemaprovider.` prefix. **The provider class itself is the `--schemaprovider-class` CLI flag, not a property.**
 
 **File-based** — the common default for DFS sources:
 ```
-hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.FilebasedSchemaProvider
+# CLI flag: --schemaprovider-class org.apache.hudi.utilities.schema.FilebasedSchemaProvider
 hoodie.streamer.schemaprovider.source.schema.file=<PATH>/source.avsc
 hoodie.streamer.schemaprovider.target.schema.file=<PATH>/target.avsc
 ```
@@ -238,7 +240,7 @@ Target defaults to source when omitted — set both only when the transformer ch
 
 **Hive metastore** — when a synced table already defines the schema:
 ```
-hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.HiveSchemaProvider
+# CLI flag: --schemaprovider-class org.apache.hudi.utilities.schema.HiveSchemaProvider
 hoodie.streamer.schemaprovider.source.schema.hive.database=<DB>
 hoodie.streamer.schemaprovider.source.schema.hive.table=<TABLE>
 # target.schema.hive.database / .table if the target differs
@@ -246,7 +248,7 @@ hoodie.streamer.schemaprovider.source.schema.hive.table=<TABLE>
 
 **JDBC** — derive from the upstream table:
 ```
-hoodie.streamer.schemaprovider.class=org.apache.hudi.utilities.schema.JdbcbasedSchemaProvider
+# CLI flag: --schemaprovider-class org.apache.hudi.utilities.schema.JdbcbasedSchemaProvider
 hoodie.streamer.schemaprovider.source.schema.jdbc.connection.url=<JDBC_URL>
 hoodie.streamer.schemaprovider.source.schema.jdbc.driver.type=<DRIVER_CLASS>
 hoodie.streamer.schemaprovider.source.schema.jdbc.username=<USER>
@@ -261,17 +263,15 @@ hoodie.streamer.schemaprovider.source.schema.jdbc.dbtable=<TABLE>
 ## Cleaner + archival (inline autopilot)
 
 ```
-hoodie.clean.automatic=true
-hoodie.clean.async.enabled=false
+# Automatic inline cleaning and archival are Hudi defaults — emit no on/off switches.
+# (hoodie.clean.automatic=true, hoodie.clean.async.enabled=false, hoodie.archive.automatic=true,
+#  hoodie.archive.async=false, hoodie.commits.archival.batch=10 are all defaults already.)
 hoodie.clean.policy=<KEEP_LATEST_BY_HOURS or KEEP_LATEST_COMMITS>
 hoodie.clean.hours.retained=<derived>          # if KEEP_LATEST_BY_HOURS
 hoodie.clean.commits.retained=<derived>        # if KEEP_LATEST_COMMITS
 
-hoodie.archive.automatic=true
-hoodie.archive.async=false
 hoodie.keep.min.commits=<derived from cadence — see below>
 hoodie.keep.max.commits=<keep.min.commits × 1.2>
-hoodie.commits.archival.batch=10
 ```
 
 **Derive the archival window from commit cadence — never emit a constant.**
@@ -459,7 +459,7 @@ When this path is chosen, the Architect must surface:
 # Must be set IDENTICALLY in the ingestion job and the compactor job
 hoodie.write.concurrency.mode=OPTIMISTIC_CONCURRENCY_CONTROL
 hoodie.write.lock.provider=<lock provider class>
-hoodie.cleaner.policy.failed.writes=LAZY
+hoodie.clean.failed.writes.policy=LAZY   # modern key — hoodie.cleaner.policy.failed.writes is a deprecated alias
 # ... plus the provider-specific lock config (ZK quorum, DynamoDB table, HMS URI, etc.),
 #     identical on both sides
 ```
@@ -485,7 +485,6 @@ hoodie.bulkinsert.sort.mode=NONE
 hoodie.index.type=SIMPLE
 
 # Services
-hoodie.clean.automatic=true
 hoodie.clean.policy=KEEP_LATEST_BY_HOURS
 hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.md → retention>
 # NOT a fixed 48. At 15-min cadence the safe max is ~5 days (120h); at hourly, ~20 days.
@@ -494,7 +493,6 @@ hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.
 # Example below assumes 5-min cadence + 48h cleaner window.
 # Recompute both cleaner and archival for the actual answered cadence.
 
-hoodie.archive.automatic=true
 hoodie.keep.min.commits=634        # 5-min cadence: 288 commits/day × 2 days × 1.1
 hoodie.keep.max.commits=761        # min × 1.2
 
@@ -504,7 +502,9 @@ hoodie.clustering.async.max.commits=5
 # Platform
 hoodie.metadata.enable=true
 
-# Concurrency
+# Concurrency — valid ONLY while exactly one process writes this table, counting
+# backfills, GDPR/cleanup jobs, and any standalone compactor. Any second writer
+# means the OCC block above, not this line (see Concurrency section).
 hoodie.write.concurrency.mode=SINGLE_WRITER
 ```
 
@@ -515,7 +515,7 @@ hoodie.table.type=MERGE_ON_READ                     # experience = some
 hoodie.datasource.write.recordkey.field=customer_id
 hoodie.datasource.write.partitionpath.field=       # empty (unpartitioned)
 hoodie.datasource.write.keygenerator.class=org.apache.hudi.keygen.NonpartitionedKeyGenerator
-hoodie.populate.meta.fields=true                    # mutable default
+# meta fields: kept — hoodie.populate.meta.fields defaults to true; emit only when disabling
 
 # Writer
 hoodie.datasource.write.operation=upsert
@@ -533,7 +533,6 @@ hoodie.metadata.global.record.level.index.max.filegroup.count=<same as min>
 hoodie.compact.inline=true
 hoodie.compact.inline.max.delta.commits=5
 
-hoodie.clean.automatic=true
 hoodie.clean.policy=KEEP_LATEST_BY_HOURS
 hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.md → retention>
 # NOT a fixed 48. At 15-min cadence the safe max is ~5 days (120h); at hourly, ~20 days.
@@ -542,14 +541,15 @@ hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.
 # Example below assumes 5-min cadence + 48h cleaner window.
 # Recompute both cleaner and archival for the actual answered cadence.
 
-hoodie.archive.automatic=true
 hoodie.keep.min.commits=634        # 5-min cadence: 288 commits/day × 2 days × 1.1
 hoodie.keep.max.commits=761        # min × 1.2
 
 # Platform
 hoodie.metadata.enable=true
 
-# Concurrency
+# Concurrency — valid ONLY while exactly one process writes this table, counting
+# backfills, GDPR/cleanup jobs, and any standalone compactor. Any second writer
+# means the OCC block above, not this line (see Concurrency section).
 hoodie.write.concurrency.mode=SINGLE_WRITER
 ```
 
@@ -636,7 +636,7 @@ Note that `forEachBatch` is the DataSource path from Hudi's perspective, not the
 hoodie.table.type=MERGE_ON_READ                     # experienced → async via HoodieStreamer
 hoodie.datasource.write.recordkey.field=trip_id
 hoodie.datasource.write.partitionpath.field=trip_date
-hoodie.populate.meta.fields=true                    # mutable default
+# meta fields: kept — hoodie.populate.meta.fields defaults to true; emit only when disabling
 
 # Writer
 hoodie.datasource.write.operation=upsert
@@ -656,7 +656,6 @@ hoodie.metadata.record.level.index.max.filegroup.count=<same as min>
 # COMPACTION TARGET IO TRAP — value is in MB, not bytes
 hoodie.compaction.target.io=104857600                # 100TB in MB — effectively uncapped
 
-hoodie.clean.automatic=true
 hoodie.clean.policy=KEEP_LATEST_BY_HOURS
 hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.md → retention>
 # NOT a fixed 48. At 15-min cadence the safe max is ~5 days (120h); at hourly, ~20 days.
@@ -665,13 +664,14 @@ hoodie.clean.hours.retained=<derive from commit cadence — see decision-tables.
 # Example below assumes 5-min cadence + 48h cleaner window.
 # Recompute both cleaner and archival for the actual answered cadence.
 
-hoodie.archive.automatic=true
 hoodie.keep.min.commits=634        # 5-min cadence: 288 commits/day × 2 days × 1.1
 hoodie.keep.max.commits=761        # min × 1.2
 
 # Platform
 hoodie.metadata.enable=true
 
-# Concurrency
+# Concurrency — valid ONLY while exactly one process writes this table, counting
+# backfills, GDPR/cleanup jobs, and any standalone compactor. Any second writer
+# means the OCC block above, not this line (see Concurrency section).
 hoodie.write.concurrency.mode=SINGLE_WRITER
 ```

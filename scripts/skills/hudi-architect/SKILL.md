@@ -52,7 +52,7 @@ Batch the free-text follow-ups: once several shapes are settled, ask for all the
 
 **Other widget rules:**
 
-- **Batch at most 3 questions per screen**, and **never split a gating question from the question it gates** (mutability and update-distribution belong together).
+- **Batch at most 3 questions per screen** — except that a follow-up gated by an answer collected on that same screen (e.g. Kafka record format alongside source) may share it as a fourth item — and **never split a gating question from the question it gates** (mutability and update-distribution belong together).
 - **Tradeoff tables go in prose immediately before the widget call**, never crammed into the question text. Per-option consequence belongs in each option's description.
 - **Option sets must cover the real world.** If a user reaches for "Other," treat it as a signal the options were too narrow — a Spark DataFrame from an upstream ETL job is a source, an exact retention figure is an answer. Accept it and re-derive.
 - Where no widget exists (plain chat UI, MCP client), fall back to numbered prose blocks. The question content is identical.

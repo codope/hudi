@@ -237,7 +237,7 @@ file_group_count     = (projected_record_count * bytes_per_rli_record) / 1024 / 
 - Size for the 3-4 year projection, not today. Under-sizing is unfixable; over-sizing costs little.
 - 50 bytes assumes UUID-shaped keys. Longer record keys mean a larger per-record RLI footprint — scale the constant and say so in the ADR.
 
-Worked example: 40B projected records → `(40_000_000_000 × 50) / 1024 / 1024 / 500` ≈ **3900 file groups**. Emit `min = max = 3900`.
+Worked example: 40B projected records → `(40_000_000_000 × 50) / 1024 / 1024 / 500` = **3815 file groups**; round up to **3900** for headroom (over-sizing costs little). Emit `min = max = 3900`.
 
 **Why the defaults are a trap.** Partitioned RLI defaults to `min=1, max=10`. With a 1GB max file-group size and 50-byte records, one file group holds ~21.5M records, so a partition needs ~215M projected records before the estimate even reaches the ceiling of 10. Below that it silently under-sizes.
 
@@ -259,9 +259,11 @@ Query-alignment-first, not size-first.
 
 ### Projected partition count guardrails
 
-Formula: `projected_partition_count = cardinality(partition_column) × time_buckets_across_retention`
+Formula: `projected_partition_count = cardinality(business_dimension) × time_buckets_over_table_lifetime`
 
-For date-only: `cardinality = 1`, `time_buckets = retention_days` (or months).
+Time buckets accumulate over the table's **lifetime**, projected to the 2-3 year horizon — not over the retention window. Retention governs timeline lookback (see → Retention), not how many date partitions exist on disk; date partitions are only ever added, never expired by the cleaner.
+
+For date-only: `cardinality = 1`, `time_buckets = days (or months) from first commit to the projection horizon` (daily × 3 years ≈ 1095 — matches the ADR example).
 For composite `<business_dim>/<date>`: multiply.
 
 - **Green: < 10K partitions** — proceed.
@@ -362,16 +364,14 @@ Not a hard block — user can proceed.
 Emit silently. No user question about cadence.
 
 ```
-hoodie.clean.automatic=true
-hoodie.clean.async.enabled=false
+# Automatic inline cleaning and archival are Hudi defaults — emit no on/off switches.
+# (hoodie.clean.automatic, hoodie.clean.async.enabled, hoodie.archive.automatic,
+#  hoodie.archive.async, hoodie.commits.archival.batch all already default to the desired values.)
 hoodie.clean.policy=<KEEP_LATEST_BY_HOURS or KEEP_LATEST_COMMITS>
 hoodie.clean.hours.retained OR hoodie.clean.commits.retained=<derived>
 
-hoodie.archive.automatic=true
-hoodie.archive.async=false
 hoodie.keep.min.commits=<derived — see below>
 hoodie.keep.max.commits=<derived — see below>
-hoodie.commits.archival.batch=10
 ```
 
 **Archival window derivation — from commit cadence, never a constant.**

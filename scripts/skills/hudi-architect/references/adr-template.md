@@ -42,7 +42,7 @@ Two distinct categories — keep them separate.
 
 **Assumptions** — what the Architect inferred when the user was silent or a question didn't fire at this tier. These are unverified.
 - e.g., "Assumed daily partition granularity for date-based partitioning."
-- e.g., "Assumed single writer (multi-writer deferred to future rubric)."
+- e.g., "Assumed single writer — the writer question did not fire at this tier and no other writing job was mentioned." (If the user *declared* additional writers, that is a **confirmed fact** for §2 plus an OCC requirement and a §13 blocking open question — never file it as an assumption.)
 - e.g., "Consumer read patterns not captured at this tier — Vice 1 alignment unverified."
 
 If a tier skipped a question that gates a durable decision, say so here explicitly. A reader must be able to tell which parts of the design were checked and which were guessed.
@@ -67,7 +67,7 @@ partitioning:
 meta_fields: KEEP_ALL
 services:
   cleaner: inline, KEEP_LATEST_BY_HOURS, 48h retained
-  archival: inline, min=1000 / max=1200 commits
+  archival: inline, min=634 / max=761 commits   # derived from the 5-min cadence — never a fixed 1000/1200
   compaction: async in-process, every 5 delta commits
   clustering: OFF (revisit if fragmentation grows)
 metadata_table: enabled
